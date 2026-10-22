@@ -35,11 +35,22 @@
     s.setAttribute('data-strict', g.strict || '0');
     s.setAttribute('data-reactions-enabled', '1');
     s.setAttribute('data-emit-metadata', '0');
-    s.setAttribute('data-input-position', 'top');
+    s.setAttribute('data-input-position', g.inputPosition || 'top');
     s.setAttribute('data-theme', g.theme || 'light');
     s.setAttribute('data-lang', g.lang || 'zh-CN');
     s.setAttribute('data-loading', 'lazy');
     mount.appendChild(s);
+
+    // 如果网络把 giscus.app 挡了，别让下面留一片空白
+    setTimeout(function () {
+      if (!mount.querySelector('iframe')) {
+        mount.insertAdjacentHTML('beforeend',
+          '<div class="comments-boot" style="margin-top:1rem">' +
+          '评论区没加载出来。多半是 <code>giscus.app</code> 被网络挡住了 —— ' +
+          '换条网络、开个代理再刷新试试；如果装了拦广告/拦 iframe 的插件，也顺手看一眼。' +
+          '</div>');
+      }
+    }, 9000);
   };
 
   /* ---------------- 本机留痕 ---------------- */
