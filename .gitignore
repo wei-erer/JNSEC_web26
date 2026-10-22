@@ -1,0 +1,20 @@
+# 本地预览用的临时截图，不用上传
+.shots/
+
+# 原始例会文档只在本机留一份，不进仓库
+例会文档/
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 靶场跑起来时生成的东西
+lab/flag.txt
+lab/public/
+__pycache__/
+*.pyc

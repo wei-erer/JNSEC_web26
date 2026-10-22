@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>路线 | 竹隐</title>
+<meta name="description" content="Web 安全入门大致要走的路，以及本站怎么用。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/zhulin.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="index.html">山门</a>
+    <a href="weeks/week01.html">其一 · 前端基础</a>
+    <a href="roadmap.html" aria-current="page">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+  <article>
+    <div class="juan-title">
+      <span class="plate">附卷</span>
+      <h1>路怎么走</h1>
+    </div>
+
+    <p class="juan-deck">
+      这不是课表。课表按周排，这份按"你卡在哪儿"排。
+      什么时候觉得不知道下一步干什么，回来翻一眼。
+    </p>
+
+    <div class="prose">
+
+      <h2 id="r-how" class="nonum">这个站怎么用</h2>
+
+      <p>
+        三条，都是我自己踩过坑总结的：
+      </p>
+
+      <ol>
+        <li>
+          <strong>别按顺序从头读到尾。</strong>每卷开头都有个目录，先扫一眼，
+          挑你当下最懵的那节看。看懂了就跳。
+        </li>
+        <li>
+          <strong>每个「实操」都真的做一遍。</strong>看懂和做出来之间隔着一条河。
+          这里的靶场都是故意写漏的，跑起来五分钟的事，别光读。
+        </li>
+        <li>
+          <strong>看不懂就去茶寮问，或者自己写一条。</strong>把踩到的坑记下来，
+          下次有人翻到这儿就不用再踩一遍。
+        </li>
+      </ol>
+
+      <h2 id="r-line">入门大致分这几步</h2>
+
+      <p>
+        Web 安全的东西看着散，其实有个大致的递进。下面这条不是唯一的路，
+        但大部分人是这么走过来的：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:6rem">阶段</th><th style="width:12rem">你会学到</th><th>标志是</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>看得懂</td>
+            <td>HTML / HTTP / 工具链</td>
+            <td>能对着一个请求说出每个头在干什么，能自己起环境</td>
+          </tr>
+          <tr>
+            <td>打得进</td>
+            <td>SQL 注入、XSS、文件上传、命令执行、SSRF</td>
+            <td>拿到一个输入点，知道该试哪几种 payload</td>
+          </tr>
+          <tr>
+            <td>拿得下</td>
+            <td>越权、逻辑漏洞、JWT、反序列化</td>
+            <td>能看懂一段业务代码里"信任"断在哪儿</td>
+          </tr>
+          <tr>
+            <td>走得远</td>
+            <td>组合利用、代码审计、自动化</td>
+            <td>单个点打不动时，会去找两个点拼起来</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        第一讲只把"看得懂"这一层铺了一半。剩下的慢慢来，别急。
+      </p>
+
+      <h2 id="r-where">练手的地方</h2>
+
+      <ul>
+        <li>
+          <strong><a href="https://www.ctfhub.com/#/skilltree" target="_blank" rel="noopener">CTFHub 技能树</a></strong>
+          —— 国内入门最顺的一条线，按知识点排好了，每道题都有明确的考点。第一讲的作业就是它。
+        </li>
+        <li>
+          <strong>BUUCTF / NSSCTF</strong> —— 题多、杂、有真实比赛题。适合在 CTFHub 刷完之后换口味。
+        </li>
+        <li>
+          <strong>DVWA / Pikachu</strong> —— 专门的漏洞靶场，每一类漏洞分低中高三种防护等级，可以对照着看"修了之后为什么打不动"。想理解防御，这两个比做题有用。
+        </li>
+        <li>
+          <strong>自己写一个。</strong>最有效的一步：用 phpstudy 起个页面，写一行
+          <code>echo $_GET['name'];</code>，然后想办法让它弹窗。懂了为什么能弹，就懂了 XSS。
+        </li>
+      </ul>
+
+      <div class="note secret">
+        <span class="note-tag">一条界限</span>
+        <p>
+          上面这些东西，全都在你自己的机器、或者明确授权给你练的靶场里。
+          <strong>不对任何没授权的站点做那些事</strong> —— 这不只是纪律问题，
+          《网络安全法》第二十七条写得明明白白。手上有本事和手上有案底，差别就在这一步。
+        </p>
+      </div>
+
+      <h2 id="r-tools">家伙一览</h2>
+
+      <div class="ledger">
+        <details open>
+          <summary><span class="code">Burp</span><span class="label">代理抓包改包，主力</span></summary>
+          <div class="detail">浏览器代理到 <code>127.0.0.1:8080</code> 就能用。前期只需要记住三个地方：Proxy 的 HTTP history、Repeater（改包重发）、Intruder（批量试）。</div>
+        </details>
+        <details>
+          <summary><span class="code">HackBar</span><span class="label">浏览器里的小扳手</span></summary>
+          <div class="detail">页面内快速改参数、编码解码。比 Burp 快，但只能碰到它够得着的部分。</div>
+        </details>
+        <details>
+          <summary><span class="code">phpstudy</span><span class="label">本地起 php 站</span></summary>
+          <div class="detail">文件丢 <code>www</code> 目录，浏览器开 <code>127.0.0.1</code>。用来写有漏洞的代码，然后自己打。</div>
+        </details>
+        <details>
+          <summary><span class="code">WSL / VMware</span><span class="label">随便弄坏的机器</span></summary>
+          <div class="detail">Ubuntu 装一套。跑工具、跑靶场、装只在 Linux 上有的东西。</div>
+        </details>
+        <details>
+          <summary><span class="code">Yakit</span><span class="label">另一个视角</span></summary>
+          <div class="detail">流量分析、被动扫描、批量 fuzz 比 Burp 顺手。和 Burp 互补，不是替代。</div>
+        </details>
+        <details>
+          <summary><span class="code">curl</span><span class="label">最朴素的请求工具</span></summary>
+          <div class="detail">命令行里一行就能改头。脚本化、批量、复现的时候比图形界面可靠得多。</div>
+        </details>
+      </div>
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">对路线有想法，或者想补一条，写在这儿</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本页</h4>
+      <ul class="side-toc">
+        <li><a href="#r-how">这个站怎么用</a></li>
+        <li><a href="#r-line">入门大致分这几步</a></li>
+        <li><a href="#r-where">练手的地方</a></li>
+        <li><a href="#r-tools">家伙一览</a></li>
+      </ul>
+    </div>
+  </aside>
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 附卷 &middot; 路怎么走</p>
+  <p class="colophon">仅用于队内学习，实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="assets/js/site-config.js"></script>
+<script src="assets/js/comments.js"></script>
+<script src="assets/js/site.js"></script>
+</body>
+</html>

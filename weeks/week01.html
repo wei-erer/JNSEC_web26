@@ -1,0 +1,1636 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其一 · 工具、URL 与 HTTP | 竹隐</title>
+<meta name="description" content="Burp 与 HackBar 的完整上手流程、URL 七段解剖、HTML/CSS/JS、HTTP 报文逐行读，附可运行的简易靶场。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/css/zhulin.css">
+<link rel="stylesheet" href="../assets/css/tools.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="../index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="../index.html">山门</a>
+    <a href="week01.html" aria-current="page">其一 · 前端基础</a>
+    <a href="../roadmap.html">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+
+  <article>
+    <div class="juan-title">
+      <span class="plate">其一</span>
+      <h1>工具、URL 与 HTTP</h1>
+    </div>
+
+    <p class="juan-deck">
+      这一讲不急着讲漏洞。先让你从一个"只会打开网页的人"，变成能看清请求长什么样、
+      并且能把它改掉的人。Burp 和 HackBar 是这条路上的两把刀，
+      URL 和 HTTP 报文是你接下来每次都要读的两样东西。
+    </p>
+
+    <div class="juan-meta">
+      <span>第一讲</span>
+      <span class="dot">&middot;</span>
+      <span>Burp 与 HackBar 完整流程</span>
+      <span class="dot">&middot;</span>
+      <span>含 1 个靶场、3 个实操</span>
+    </div>
+
+    <div class="prose">
+
+      <h2 id="s-intro" class="nonum" style="margin-top:2.4rem">这一讲在讲什么</h2>
+
+      <p>
+        Burp、URL、HTTP 头、Cookie、状态码 —— 这些词你大概都见过。
+        但第一次连起来看，往往不知道它们各自在说谁。这不怪你，
+        这些东西本来就是互相引着才成立的。
+      </p>
+
+      <p>
+        所以这里把它们重新排了个顺序，只围绕三个问题打转：
+      </p>
+
+      <ol>
+        <li><strong>地址。</strong>你在浏览器里敲一串东西，它凭什么知道要去哪台机器、要哪个文件？—— 这是 <em>URL</em>。</li>
+        <li><strong>页面。</strong>那台机器把一堆文字吐回来，怎么就变成你看到的网页了？—— 这是 <em>HTML / CSS / JavaScript</em>。</li>
+        <li><strong>对话。</strong>这一来一回，机器之间究竟说了什么？—— 这是 <em>HTTP 报文</em>。</li>
+      </ol>
+
+      <p>
+        三个问题答完，剩下的都是练习：拿工具把这套东西拆开看，再看看拆开之后能改出什么花样。
+        改出花样那部分，就是"安全"。
+      </p>
+
+      <blockquote>
+        <p>安全的人看网页，和普通人看网页，眼睛落的地方不一样。</p>
+        <p>普通人看内容；我们看的是：这个内容由谁来、凭什么、按照什么规则送到你面前。</p>
+      </blockquote>
+
+      <p>
+        另外说明一下记号：带 <strong>「补充」</strong> 的，是讲台上没来得及展开、但迟早会撞上的部分；
+        带 <strong>「实操」</strong> 的，是自己电脑上就能跑一遍的。前者可以先跳过，后者建议都做。
+      </p>
+
+
+      <h2 id="s-tools">先把家伙备齐</h2>
+
+      <p>
+        这一讲会用到的工具，真正要练熟的只有两个：<strong>Burp</strong> 和 <strong>HackBar</strong>。
+        另外几样装上备用，用到再折腾。
+      </p>
+
+      <table>
+        <thead>
+          <tr><th style="width:7.5rem">工具</th><th style="width:8rem">干什么用</th><th>什么时候会碰到</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>BurpSuite</td><td>抓包、改包、重放</td><td>所有需要看清并改动请求的场合 —— 主力</td></tr>
+          <tr><td>HackBar</td><td>在页面上改参数</td><td>改 URL 参数、发 POST 数据，比开 Burp 快</td></tr>
+          <tr><td>phpstudy</td><td>本地起 PHP 站</td><td>想自己写个有洞的页面，然后打自己</td></tr>
+          <tr><td>WSL / VMware</td><td>一台 Linux</td><td>跑工具、跑靶场、装只有 Linux 才有的东西</td></tr>
+          <tr><td>Yakit</td><td>流量分析、被动扫描</td><td>Burp 之外换个视角看流量</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        下面两节把 Burp 和 HackBar 从头到尾走一遍：装好了界面哪块是干什么的、火狐怎么配、
+        怎么抓出第一个包、怎么改出一个不一样的结果。剩下三样放在最后简单交代。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">装之前先说一句</span>
+        <p>
+          别一上来装全套。先把 Burp 那条路走通 —— 能抓、能看、能改 ——
+          剩下的什么时候需要什么时候装。工具装了一堆却一个都不熟，是最常见的时间黑洞。
+        </p>
+      </div>
+
+      <h2 id="s-burp">BurpSuite：从装上到改出第一个包</h2>
+
+      <p>
+        这是这一讲里唯一一个你会天天开的工具，值得花半小时摸熟。
+        下面按顺序走：它夹在中间干什么 → 界面哪块是干什么的 → 火狐怎么配 →
+        证书怎么装 → 怎么抓出第一个包 → 怎么改出一个不一样的结果。
+      </p>
+
+      <h3>它到底在干什么</h3>
+
+      <p>
+        平时是浏览器直接跟服务器说话。装了 Burp 之后，你在浏览器里设一个代理，
+        所有请求先交到 Burp 手上，再由它转给服务器。于是它夹在中间，<strong>能看、能停、能改</strong>。
+        专业点叫<em>中间人代理</em>（MITM Proxy）。
+      </p>
+
+      <p>
+        那 HTTPS 呢？HTTPS 本来是加密的，按说它看不见。但 Burp 会在你机器上装一张自己的
+        CA 根证书，浏览器信任了这张证书之后，Burp 就可以给每个网站现签一张证书，
+        解密 → 给你看 → 再加密送出去。
+      </p>
+
+      <p>
+        所以<strong>装不装那张证书，决定了你能不能抓 HTTPS</strong>。这一步几乎每个人第一次都会漏，
+        漏了之后的症状是：http 网站能抓，https 网站页面一片红，写着"您的连接不是私密连接"。
+      </p>
+
+      <h3>第一步：装，然后开起来</h3>
+
+      <p>
+        官网下 <strong>Community Edition</strong>（免费版），一路默认装完。开起来之后会问你两件事：
+      </p>
+
+      <ol class="step">
+        <li>
+          第一屏问项目放哪。<strong>选 Temporary project</strong>，点 Next。
+          （免费版本来就存不了项目，选它最省事。）
+        </li>
+        <li>
+          第二屏问用哪套配置。<strong>选 Use Burp defaults</strong>，点 Start Burp。
+        </li>
+      </ol>
+
+      <p>
+        等几秒，主界面出来。左上角一排标签就是它的全部功能，别被吓到 —— 前期你只需要其中两个。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">免费版少了什么</span>
+        <p>
+          Community 版足够做完入门阶段的所有事。它缺的主要是：Intruder 跑得慢（限速）、
+          不能保存项目、没有自动扫描器。前两个影响不大，第三个到你有能力用它的时候再说。
+        </p>
+      </div>
+
+      <h3>第二步：界面认路</h3>
+
+      <p>顶部那排标签，先认这几个：</p>
+
+      <table>
+        <thead><tr><th style="width:7rem">标签</th><th style="width:7rem">中文</th><th>干什么的</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Proxy</strong></td><td>代理</td><td>流量都从这儿过。里面有两个子页：Intercept（拦截）和 HTTP history（历史）。<strong>你 90% 的时间在这里。</strong></td></tr>
+          <tr><td><strong>Repeater</strong></td><td>重放</td><td>把一条请求抓过来，随便改，点一下发一次。<strong>第二常用的地方。</strong></td></tr>
+          <tr><td>Intruder</td><td>爆破</td><td>把某个位置换成字典里的值，批量跑一遍。做爆破、fuzz 用</td></tr>
+          <tr><td>Decoder</td><td>编解码</td><td>URL、Base64、Hex 互相转，不用去网上找工具</td></tr>
+          <tr><td>Comparer</td><td>比对</td><td>两个响应哪里不一样，眼睛看不出来的时候用它</td></tr>
+          <tr><td>Extensions</td><td>插件</td><td>装第三方插件的地方，前期先不管</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        先只记 <strong>Proxy</strong> 和 <strong>Repeater</strong> 两个，其他的等你需要的时候自然会想起来。
+      </p>
+
+      <h3>第三步：让火狐的流量走 Burp</h3>
+
+      <p>
+        为什么用火狐？因为它的插件商店国内能直接打开，不用折腾网络。
+        而 Burp 自带的内嵌浏览器虽然更省事，但你以后会同时开很多窗口、要装别的插件，
+        还是自己的浏览器顺手。
+      </p>
+
+      <ol class="step">
+        <li>
+          火狐 → 右上角三横线 → <strong>附加组件和主题</strong> → 搜 <code>FoxyProxy Standard</code> → 添加到 Firefox。
+        </li>
+        <li>
+          装完工具栏会多一个小狐狸图标。点它 → <strong>Options</strong>（选项）。
+        </li>
+        <li>
+          在 Proxies 那一页点 <strong>Add</strong>（添加），按下面填：
+          <div class="cmd"><code>Title:        Burp
+Proxy Type:   HTTP
+IP address:   127.0.0.1
+Port:         8080</code></div>
+          其他的都留空，点 Save。
+        </li>
+        <li>
+          再点小狐狸图标，在列表里选 <strong>Burp</strong>。图标变色（或者名字前面出现勾）
+          就表示这条路通了。
+        </li>
+      </ol>
+
+      <div class="note pit">
+        <span class="note-tag">两个容易漏的</span>
+        <ul>
+          <li>
+            火狐自己的代理设置（设置 → 网络设置）如果也配了一份，会和 FoxyProxy 抢。
+            装了 FoxyProxy 之后，以它为准就行，别两头都开。
+          </li>
+          <li>
+            火狐默认可能开着 <strong>HTTP/3</strong>。它在 UDP 上跑，不走你的 http 代理，
+            表现为"明明请求了却抓不到"。地址栏输 <code>about:config</code>，
+            搜 <code>network.http.http3.enable</code>，双击改成 <code>false</code>。
+          </li>
+        </ul>
+      </div>
+
+      <h3>第四步：装证书（不装就只能抓 http）</h3>
+
+      <p>
+        这一步是 HTTPS 的关键。顺序别乱：<strong>先让代理通，再去下证书</strong>。
+      </p>
+
+      <ol class="step">
+        <li>
+          保持 FoxyProxy 选着 Burp，在火狐里访问 <code>http://burp</code>。
+          这个地址不是真网站，是 Burp 自己接的。
+        </li>
+        <li>
+          页面右上角有一行 <strong>CA Certificate</strong>，点它，下载一个
+          <code>cacert.der</code>。
+        </li>
+        <li>
+          火狐 → 设置 → <strong>隐私与安全</strong> → 拉到最下面 <strong>证书</strong> 那块 →
+          点 <strong>查看证书</strong>。
+        </li>
+        <li>
+          切到 <strong>证书颁发机构</strong> 页签 → <strong>导入</strong> → 选中刚才那个
+          <code>cacert.der</code>。
+        </li>
+        <li>
+          弹出的框里勾上 <strong>「信任由此证书颁发机构来标识网站」</strong>，确定。
+        </li>
+        <li>把火狐完全关掉再打开。</li>
+      </ol>
+
+      <p>
+        做完再访问一个 https 网站，页面正常显示、Burp 的 HTTP history 里能看到请求，
+        就说明成了。
+      </p>
+
+      <h3>第五步：抓出第一个包</h3>
+
+      <p>现在开始真正的操作。全程只用鼠标，跟着点：</p>
+
+      <ol class="step">
+        <li>Burp 开着，火狐的 FoxyProxy 选 Burp。</li>
+        <li>Burp 顶部点 <strong>Proxy</strong> 标签。</li>
+        <li>Proxy 下面有两个子页，点右边的 <strong>HTTP history</strong>（先别管 Intercept）。</li>
+        <li>切回火狐，访问 <code>http://example.com</code>。</li>
+        <li>回到 Burp，HTTP history 的表格里多了一行，Method 是 <code>GET</code>，URL 是 <code>http://example.com/</code>。</li>
+        <li>点这一行，界面下半部分会出现两块：<strong>Request</strong> 和 <strong>Response</strong>。</li>
+        <li>在 Request 那块的上方，能看到 <strong>Raw / Headers / Hex</strong> 三个切换。点 <strong>Raw</strong>。</li>
+      </ol>
+
+      <p>这时候你看到的就是裸的 HTTP 报文，长这样：</p>
+
+      <pre><code>GET / HTTP/1.1
+Host: example.com
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: zh-CN,zh;q=0.8
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1</code></pre>
+
+      <p>
+        这就是第七节要逐行讲的那个东西。现在它不再是教材上的示意图，是你自己刚抓的。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">HTTP history 里那几列</span>
+        <ul>
+          <li><strong>#</strong> 序号，只是顺序</li>
+          <li><strong>Method</strong> GET / POST …</li>
+          <li><strong>URL</strong> 请求到哪</li>
+          <li><strong>Status</strong> 响应码，200 / 302 / 404 那些</li>
+          <li><strong>Length</strong> 响应体多大</li>
+          <li><strong>MIME type</strong> 响应是什么格式</li>
+        </ul>
+        <p>表格上方有个输入框，可以按关键字过滤。找 <code>login</code>、<code>admin</code>、<code>api</code> 这几个词特别有用。</p>
+      </div>
+
+      <h3>第六步：Repeater —— 改一个头，再发一遍</h3>
+
+      <p>
+        抓包只是看。真正干活是在 Repeater 里：把请求复制一份过来，改成你想要的样子，
+        点一下发一次，看服务端怎么反应。
+      </p>
+
+      <ol class="step">
+        <li>在 HTTP history 里，<strong>右键</strong>你刚抓的那条请求 → <strong>Send to Repeater</strong>。（也可以先点中，按 <code>Ctrl + R</code>。）</li>
+        <li>顶部标签栏里的 <strong>Repeater</strong> 会闪一下，点进去。</li>
+        <li>左边是请求原文，光标点进去就能改，跟改文本文件一样。</li>
+        <li>右边是上一次的响应，空的也正常。</li>
+        <li>点左上角的 <strong>Send</strong>（或按 <code>Ctrl + 空格</code>）。</li>
+        <li>右边会刷出新响应，上方的状态码也跟着变。</li>
+      </ol>
+
+      <p>
+        这就是后面所有题的通用动作：<strong>抓一条 → 送 Repeater → 改 → Send → 看响应</strong>。
+        练熟这五下，一大半的题你都能开始动了。
+      </p>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>用靶场走一遍完整流程</h3>
+        </div>
+        <ol class="step">
+          <li>
+            先把靶场跑起来：
+            <div class="cmd"><code>python lab/zhulin_lab.py</code></div>
+          </li>
+          <li>火狐访问 <code>http://127.0.0.1:8081/gate/2</code>，页面显示"不让进"。</li>
+          <li>
+            Burp → Proxy → HTTP history，找到刚才那条 <code>GET /gate/2</code>，
+            点开看 Request 页签，注意这一行：<code>Host: 127.0.0.1:8081</code>。
+          </li>
+          <li>右键 → Send to Repeater，切到 Repeater。</li>
+          <li>把 <code>Host: 127.0.0.1:8081</code> 改成 <code>Host: admin.internal</code>。</li>
+          <li>点 Send。右边的响应里出现 <code>flag{...}</code>。</li>
+        </ol>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          你刚刚做的事，就是"改一个请求头"。听起来简单，但真实世界里
+          相当一部分漏洞，都是这样改出来的。
+        </p>
+      </div>
+
+      <h3>第七步：Intercept —— 把请求拦在门口</h3>
+
+      <p>
+        Repeater 是"事后改"。Intercept 是"当场拦"：请求发出去的一瞬间被 Burp 抓住，
+        你不动它，浏览器就一直转圈。
+      </p>
+
+      <ol class="step">
+        <li>Burp → Proxy → 子页切到 <strong>Intercept</strong>。</li>
+        <li>点一下 <strong>Intercept is off</strong>，它会变成 <strong>Intercept is on</strong>。</li>
+        <li>回火狐随便点个链接，页面卡住不动了。</li>
+        <li>回 Burp，报文就摆在那儿，可以直接改。</li>
+        <li>点 <strong>Forward</strong> 放它过去，或者点 <strong>Drop</strong> 扔掉。</li>
+      </ol>
+
+      <div class="note pit">
+        <span class="note-tag">最容易浪费半小时的一个坑</span>
+        <p>
+          Intercept 开着忘了关，浏览器会一直白屏转圈，你会以为网断了、代理坏了、Burp 崩了。
+          <strong>记住它长什么样：Burp 里有个请求停着不动，等你点 Forward。</strong>
+        </p>
+        <p>
+          建议：平时把它关掉，只用 HTTP history 看历史。历史也不会丢，随时点开慢慢看，
+          比让浏览器干等着舒服得多。
+        </p>
+      </div>
+
+      <h3>几个早点养成的手感</h3>
+
+      <ul>
+        <li><strong>Ctrl + R</strong> —— 送 Repeater。这是最高频的一个键。</li>
+        <li><strong>Ctrl + F</strong> —— 在 HTTP history 里搜字。搜 <code>password</code>、<code>token</code>、<code>api</code>。</li>
+        <li><strong>右键 → Copy as curl</strong> —— 把一条请求变成命令行，方便复现和写脚本。</li>
+        <li><strong>右键 → Do intercept → Response to this request</strong> —— 连响应也拦下来改。做 XSS 题时常用。</li>
+        <li><strong>Proxy → HTTP history 上方的过滤框</strong> —— 只显示某个域名、某种状态码，把噪音滤掉。</li>
+      </ul>
+
+      <h3>抓不到包的时候，按这个顺序查</h3>
+
+      <table>
+        <thead><tr><th style="width:8rem">症状</th><th>大概率是</th><th>怎么办</th></tr></thead>
+        <tbody>
+          <tr><td>HTTP history 一条都没有</td><td>火狐没走代理</td><td>点小狐狸图标，确认选中的是 Burp；Burp 得开着</td></tr>
+          <tr><td>https 页面一片红</td><td>证书没装或没信任</td><td>回第四步，重下 <code>cacert.der</code>，导入时勾上"信任"</td></tr>
+          <tr><td>浏览器一直转圈</td><td>Intercept 开着</td><td>Proxy → Intercept → 点成 off</td></tr>
+          <tr><td>个别站抓不到</td><td>它走 HTTP/3 或固定 IP 直连</td><td>关掉火狐的 HTTP/3；或改用 Burp 自带的浏览器</td></tr>
+          <tr><td>127.0.0.1 的站抓不到</td><td>本地地址被排除在代理外</td><td>FoxyProxy 的代理配置里别勾"绕过本地地址"</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="s-hackbar">HackBar：在页面上直接改参数</h2>
+
+      <p>
+        Burp 是站在门外的代理，HackBar 是坐在浏览器里的一把改锥。
+        点开它，当前页面的地址就摊在你面前，改参数、勾 POST data、点一次 Execute —— 页面重新加载。
+        它做不了 Burp 那么多事，但胜在快。
+      </p>
+
+      <h3>它和 Burp 的分工</h3>
+
+      <table>
+        <thead><tr><th style="width:10rem">你要做的事</th><th style="width:7rem">用哪个</th><th>为什么</th></tr></thead>
+        <tbody>
+          <tr><td>改一个 URL 参数，看回显变不变</td><td>HackBar</td><td>点两下就完事，不用开 Burp 翻历史</td></tr>
+          <tr><td>改 <code>Cookie</code>、<code>Host</code>、自己加一个头</td><td>Burp</td><td>HackBar 碰不到请求头</td></tr>
+          <tr><td>同一个请求改十几次对比结果</td><td>Burp Repeater</td><td>修改和结果并排摆着，不用来回切页面</td></tr>
+          <tr><td>看响应体的原始内容</td><td>Burp</td><td>页面渲染后的样子会丢信息</td></tr>
+          <tr><td>编码解码一串特殊字符</td><td>都行</td><td>HackBar 按钮直接点，Burp 有 Decoder</td></tr>
+        </tbody>
+      </table>
+
+      <h3>装</h3>
+
+      <p>
+        HackBar 是浏览器扩展商店里的东西，搜 <code>HackBar</code> 就能找到。
+        要注意的是：<strong>它这几年的版本比较乱</strong>，有的要填激活码，有的改名叫 HackBar V2，
+        不同版本界面略有出入。装的时候认准免费的那个，功能差别不大。
+      </p>
+
+      <p>
+        装完在工具栏会多一个图标，点一下，面板从页面上方或下方展开。
+        如果图标是灰的，先在浏览器里打开一个普通网页（<code>about:blank</code> 之类的特殊页面上它不工作）。
+      </p>
+
+      <h3>界面认路</h3>
+
+      <p>面板不大，分三块：</p>
+
+      <ul>
+        <li>
+          <strong>最上面一行按钮：</strong><code>Load URL</code> 把当前地址读进来；
+          <code>Split URL</code> 把 URL 和参数拆成两栏分别编辑；<code>Execute</code> 发出去。
+        </li>
+        <li>
+          <strong>中间的输入框：</strong>你要发的东西写在这儿。
+          默认是 URL；勾上 <code>Post data</code> 之后，这里填的就是请求体。
+        </li>
+        <li>
+          <strong>下面一片按钮：</strong>编码解码。
+          <code>URL encode</code> / <code>URL decode</code>、<code>Base64</code>、
+          <code>Hex</code>、<code>MD5</code>、<code>SHA-1</code>、<code>ROT13</code> 这些。
+          用法是选中输入框里的一段文字，再点对应按钮。
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">它到底做了什么</span>
+        <p>
+          剥开看很简单：把地址栏改成你写的那串，然后刷新；或者构造一个 POST 请求发出去。
+          所以它只能碰 <strong>URL 和请求体</strong>，碰不到请求头 —— 请求头是浏览器的地盘，
+          页面里的脚本改不了。这也是为什么改 Cookie、改 Host 必须回 Burp。
+        </p>
+      </div>
+
+      <h3>一次完整的 GET 改造</h3>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>用靶场第四关练手</h3>
+        </div>
+        <ol class="step">
+          <li>
+            靶场跑起来（<code>python lab/zhulin_lab.py</code>），火狐打开：
+            <div class="cmd"><code>http://127.0.0.1:8081/download?file=notice.txt</code></div>
+            页面显示通知内容的全文。
+          </li>
+          <li>点浏览器工具栏上的 HackBar 图标，面板展开。</li>
+          <li>点 <strong>Load URL</strong>，地址被填进输入框。</li>
+          <li>
+            在输入框里把 <code>file=notice.txt</code> 改成
+            <code>file=../flag.txt</code>。
+          </li>
+          <li>点 <strong>Execute</strong>。</li>
+          <li>页面重新加载，内容变成 <code>flag{...}</code>。</li>
+        </ol>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          这和你在地址栏里手动改完按回车，效果是一样的。HackBar 的价值不在"能做新事情"，
+          在于把改参数、编码、发 POST 这几件事压缩到了一次点击。
+        </p>
+      </div>
+
+      <h3>一次 POST 提交</h3>
+
+      <p>
+        对正经网站做这件事之前，先在自己起的靶场或者明确授权的环境里练。
+        流程是：
+      </p>
+
+      <ol class="step">
+        <li>打开目标页面（就是平时点提交按钮的那个页面）。</li>
+        <li>打开 HackBar，点 <strong>Load URL</strong> 读进地址。</li>
+        <li>勾上 <strong>Post data</strong>。这时候输入框的含义变了 —— 它代表请求体。</li>
+        <li>
+          填上参数，格式和表单一样：
+          <div class="cmd"><code>username=admin&amp;password=123456</code></div>
+        </li>
+        <li>点 <strong>Execute</strong>，页面返回的是服务端收到这组参数之后的响应。</li>
+      </ol>
+
+      <p>
+        这里能玩的花样就多了：把 <code>role=user</code> 改成 <code>role=admin</code>、
+        把 <code>price=199</code> 改成 <code>price=1</code>、把 <code>id=1</code> 改成 <code>id=2</code>。
+        这属于"参数篡改"，比改请求头更常见 —— 因为后端最容易忘的就是校验"你传上来的这个值该不该是你传的这个值"。
+      </p>
+
+      <h3>那几个编码按钮什么时候用</h3>
+
+      <p>
+        最常见的是 <strong>URL encode</strong>。前面第五节讲过，URL 里有些字符不能直接出现，
+        <code>&amp;</code>、<code>=</code>、<code>#</code>、空格这些都要转成 <code>%XX</code>。
+      </p>
+
+      <p>
+        另外一个是<strong>连点两次 encode</strong>。这对应"双重编码"：
+        服务端解一次码之后，<code>%252e</code> 变成 <code>%2e</code>，
+        如果只有第一道过滤器拦 <code>..</code>，那它就被绕过去了。
+        遇到"明明按规则拦了却还能打进去"的题，先试试这个。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">一句提醒</span>
+        <p>
+          HackBar 改的是你自己浏览器发出的请求。也就是说 ——
+          你能改的东西，任何人也都能改。<strong>凡是客户端能改的，都不能拿来当权限依据。</strong>
+          这句在第七节讲 Cookie 的时候还会出现一次。
+        </p>
+      </div>
+
+      <h2 id="s-others">剩下三样，装上备用</h2>
+
+      <p>
+        这三样前两个月用得不多，但迟早会碰上。先说清楚各自解决什么问题，装法给链接，需要时再去弄。
+      </p>
+
+      <h3>phpstudy —— 在自己电脑上开个小站</h3>
+
+      <p>
+        一键装好 Apache/Nginx + PHP + MySQL，把 <code>.php</code> 和 <code>.html</code> 文件丢进它的
+        <code>www</code> 目录，浏览器访问 <code>127.0.0.1</code> 就能看到。
+      </p>
+
+      <p>
+        它的价值在于：<strong>你可以自己写一段有漏洞的代码，然后亲手打它。</strong>
+        网上抄来的题解看一百遍，不如自己写一个 <code>echo $_GET['name'];</code> 然后看着弹窗出现。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">为什么能跑 php</span>
+        <p>因为 Apache 配了 <code>mod_php</code>（或转给 php-fpm）。浏览器请求 <code>/a.php</code>，
+        Apache 发现后缀是 <code>.php</code>，就不当文本发出去，而是先交给 PHP 解释器执行，
+        把"执行完的输出"再发回浏览器。所以你在 <code>.php</code> 里写的代码，用户是看不到源码的；
+        但你在 <code>.html</code> 里写的东西，用户右键就能全看到。这个差别后面会反复用到。</p>
+      </div>
+
+      <h3>VMware / WSL —— 一台可以随便弄坏的机器</h3>
+
+      <p>
+        装一个 Ubuntu。用途：跑工具、跑靶场、装各种只能装在 Linux 上的东西，
+        以及最重要的 —— <strong>随便折腾，弄坏了删掉重来</strong>。
+      </p>
+
+      <p>
+        两个方案：
+      </p>
+      <ul>
+        <li><strong>WSL</strong>：不用重启切系统，Windows 里开个窗口就是 Linux，文件互通。装法见 <a href="https://learn.microsoft.com/zh-cn/windows/wsl/install" target="_blank" rel="noopener">微软官方文档</a>，一条 <code>wsl --install</code> 就差不多。</li>
+        <li><strong>VMware</strong>：完整虚拟机，隔离更彻底，跑 Windows 靶机、做网络拓扑测试的时候必需。</li>
+      </ul>
+
+      <h3>Yakit —— 顺手再备一个</h3>
+
+      <p>
+        国产的，图形界面底下挂着一门叫 <code>yak</code> 的脚本语言。
+        和 Burp 是互补关系：Burp 强在手工改包和插件生态，Yakit 强在流量分析、被动扫描、批量 fuzz，
+        而且中文界面、开箱即用。官网在 <a href="https://yaklang.io/products/intro/" target="_blank" rel="noopener">yaklang.io</a>，
+        安装包在 <a href="https://github.com/yaklang/yakit" target="_blank" rel="noopener">GitHub</a>。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">说句实在的</span>
+        <p>
+          工具不是越多越好。前两个月，<strong>Burp + 一个干净的浏览器 + 一个能起本地站的 phpstudy</strong>
+          就足够你做完绝大部分 Web 入门题。装一堆却一个都不熟，不如把 Burp 的 Repeater 用出肌肉记忆。
+        </p>
+      </div>
+
+
+      <h2 id="s-url">看路：URL 拆成七段</h2>
+
+      <h3>它到底是什么</h3>
+
+      <p>
+        URL 的全称是 Uniform Resource Locator，翻过来就是"统一资源定位符"。
+        名字唬人，干的活很朴素：<strong>告诉别人去哪儿、找什么、带什么条件</strong>。
+      </p>
+
+      <p>
+        一个完整的 URL 最多能拆成七段。注意"最多" —— 大部分时候只用到三四段，
+        但真出事的时候，往往就出在那几段你从来没留意过的部分上。
+      </p>
+
+      <table>
+        <thead>
+          <tr><th style="width:6.5rem">分段</th><th style="width:8rem">英文</th><th>它在说什么</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>协议</td><td><code>scheme</code></td><td>用什么规矩说话。<code>http</code>、<code>https</code>、<code>ftp</code>、<code>file</code>…</td></tr>
+          <tr><td>用户 / 口令</td><td><code>user:pass</code></td><td>有些服务把账号密码直接写在地址里</td></tr>
+          <tr><td>主机</td><td><code>host</code></td><td>域名或 IP，最终解析成一台机器</td></tr>
+          <tr><td>端口</td><td><code>port</code></td><td>这台机器上的哪一扇门。HTTP 默认 80，HTTPS 默认 443</td></tr>
+          <tr><td>路径</td><td><code>path</code></td><td>要哪个文件 / 走哪个接口</td></tr>
+          <tr><td>查询串</td><td><code>query</code></td><td><code>?key=value&amp;key2=value2</code>，额外的条件</td></tr>
+          <tr><td>片段</td><td><code>fragment</code></td><td><code>#</code> 后面那段，只留在浏览器里，<strong>不发给服务器</strong></td></tr>
+        </tbody>
+      </table>
+
+      <h3>端口是什么东西</h3>
+
+      <p>
+        有个比喻一直很好用：<strong>服务器是栋房子，端口是通向各个房间的门。</strong>
+      </p>
+
+      <p>
+        一台服务器只有一个 IP，但上面同时跑着网站、数据库、SSH。IP 只负责把包送到这栋房子，
+        具体进哪个房间，看端口号。所以看到 <code>127.0.0.1:8080</code>，意思是"本机这栋房子的 8080 号房间"。
+      </p>
+
+      <p>
+        几个要记住的：<code>80</code> HTTP、<code>443</code> HTTPS、<code>22</code> SSH、
+        <code>3306</code> MySQL、<code>6379</code> Redis、<code>8080</code> 常见的备用 Web 端口。
+        端口范围是 1–65535，理论上随你用哪一个。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">为什么安全的人记端口</span>
+        <p>
+          因为<strong>默认端口会被防火墙放行，非默认端口常常是"内部服务忘了关"</strong>。
+          扫到一台机器开着 6379，那大概率是个没设密码的 Redis —— 这类事每年都在发生。
+        </p>
+      </div>
+
+      <h3>动手：把 URL 剖开</h3>
+
+      <p>下面这个可以改。改上面的地址，下面的分段、解释、安全提示都会跟着变。</p>
+
+      <div class="tool" id="url-lab">
+        <div class="tool-bar">
+          <span class="name">剖 URL</span>
+          <span class="hint">试着删掉一段，看看会发生什么</span>
+        </div>
+        <div class="tool-body">
+          <label class="field" for="url-in">
+            <span>粘一个地址进来</span>
+            <input type="text" id="url-in" spellcheck="false" autocomplete="off"
+                   value="https://admin:p%40ss@shop.example.com:8443/item/list?page=2&amp;sort=price#reviews">
+          </label>
+
+          <div class="url-echo" id="url-echo" aria-live="polite"></div>
+
+          <div class="url-legend">
+            <span><i style="background:#a7c79b"></i>协议</span>
+            <span><i style="background:#e0896f"></i>用户/口令</span>
+            <span><i style="background:#e8e0cf"></i>主机</span>
+            <span><i style="background:#d9bd86"></i>端口</span>
+            <span><i style="background:#b9cbb4"></i>路径</span>
+            <span><i style="background:#e0776a"></i>查询串</span>
+            <span><i style="background:#8e9a90"></i>片段</span>
+          </div>
+
+          <ul class="url-parts" id="url-parts"></ul>
+          <div class="url-verdict" id="url-verdict"></div>
+        </div>
+      </div>
+
+      <h3>补充一：URL 编码，绕过的老朋友</h3>
+
+      <p>
+        URL 里能直接出现的字符是有规定的：空格不行，中文不行，<code>&amp;</code>、<code>=</code>、<code>?</code>、<code>#</code>
+        这些有特殊含义的也不方便直接写。所以规矩是：<strong>把不方便的字符，换成 <code>%</code> 加两位十六进制数</strong>。
+      </p>
+
+      <p>
+        几个例子：
+      </p>
+      <ul>
+        <li>空格 → <code>%20</code>（表单里也常写成 <code>+</code>）</li>
+        <li><code>&amp;</code> → <code>%26</code>，<code>=</code> → <code>%3D</code>，<code>#</code> → <code>%23</code></li>
+        <li>中文「竹」→ UTF-8 是 <code>E7 AB B9</code> → <code>%E7%AB%B9</code></li>
+        <li>点 <code>.</code> → <code>%2E</code>，斜杠 <code>/</code> → <code>%2F</code></li>
+      </ul>
+
+      <p>
+        为什么这对安全重要？因为<strong>「服务器看到的字符」和「过滤器检查的字符」经常不是同一串</strong>。
+      </p>
+
+      <pre><code>你可能想访问：   /download?file=../../etc/passwd
+过滤器拦住 ..：  /download?file=..%2f..%2fetc%2fpasswd   ← %2F 解码后才是 /
+再狠一点：      /download?file=%252e%252e%252f          ← 双重编码，解两次才现形</code></pre>
+
+      <p>
+        这类差异有个统一的名字，叫 <em>编码绕过</em>。后面学注入、学上传、学 XSS，都会再见到它。
+        记住一句话就够：<strong>过滤和解码，谁先谁后，决定了洞在不在。</strong>
+      </p>
+
+      <h3>补充二：同一个 URL，会被人看成两个</h3>
+
+      <p>
+        看这串：
+      </p>
+      <pre><code>https://www.jiangnan.edu.cn@evil.com/login</code></pre>
+
+      <p>
+        人的眼睛大概率扫到 <code>jiangnan.edu.cn</code> 就放心了。
+        但按规范，<code>@</code> 之前那一段是 <strong>userinfo（用户名）</strong>，
+        真正的主机是 <code>@</code> 后面的 <code>evil.com</code>。
+      </p>
+
+      <p>
+        浏览器会把你送到 evil.com，同时把 <code>www.jiangnan.edu.cn</code> 当作"用户名"一起发过去。
+        钓鱼链接大量使用这个特性。所以看 URL 的正确姿势是：<strong>找到最后一个 <code>@</code>，它后面那一段才是真主机。</strong>
+      </p>
+
+      <p>
+        类似的还有子域名伪装：<code>jiangnan.edu.cn.evil.com</code> 的主机是 <code>evil.com</code>，不是江南大学。
+        域名永远从右往左读。
+      </p>
+
+
+      <h2 id="s-front">织骨：HTML / CSS / JavaScript</h2>
+
+      <p>
+        这三样分工很清楚：
+      </p>
+      <ul>
+        <li><strong>HTML</strong> —— 内容与结构。这里有个标题、那里有张图。</li>
+        <li><strong>CSS</strong> —— 外观。标题多大、什么颜色、放哪儿。</li>
+        <li><strong>JavaScript</strong> —— 行为。点了按钮会发生什么。</li>
+      </ul>
+
+      <p>
+        MDN 上写得很全（<a href="https://developer.mozilla.org/zh-CN/docs/Learn_web_development/Getting_started" target="_blank" rel="noopener">中文入门</a>），
+        这里只挑和安全直接相关的那部分讲。
+      </p>
+
+      <h3>HTML：一个页面最少要有什么</h3>
+
+      <p>下面这段几乎就是所有网页的骨架，逐行看：</p>
+
+      <pre><code>&lt;!doctype html&gt;
+&lt;html lang="zh-CN"&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;竹隐&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;h1&gt;我的第一个页面&lt;/h1&gt;
+  &lt;p&gt;Hello, Web.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+      <table>
+        <thead><tr><th style="width:9rem">标签</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>&lt;!doctype html&gt;</code></td><td>告诉浏览器"按现代标准解析我"。少了它，浏览器会切到怪异模式，布局全乱。现在它基本只剩这一个作用。</td></tr>
+          <tr><td><code>&lt;html&gt;</code></td><td>根元素，整个页面都包在里面。<code>lang</code> 属性标明语种，念屏软件、翻译靠它。</td></tr>
+          <tr><td><code>&lt;head&gt;</code></td><td>给浏览器和搜索引擎看的东西，<strong>不显示在页面上</strong>。</td></tr>
+          <tr><td><code>&lt;meta charset="utf-8"&gt;</code></td><td>声明编码。不写就可能中文乱码。统一用 utf-8，别用别的。</td></tr>
+          <tr><td><code>&lt;meta name="viewport"&gt;</code></td><td>让手机按手机屏幕的宽度渲染，不然整页缩成一小团。</td></tr>
+          <tr><td><code>&lt;title&gt;</code></td><td>标签页上那个标题，也是收藏时默认的名字。</td></tr>
+          <tr><td><code>&lt;body&gt;</code></td><td>用户真正看到的一切：文字、图片、按钮、表单。</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        元素的基本形状是 <code>&lt;标签 属性="值"&gt;内容&lt;/标签&gt;</code>。
+        少数元素没有内容，比如 <code>&lt;img src="a.png"&gt;</code>、<code>&lt;br&gt;</code>、<code>&lt;input&gt;</code>。
+      </p>
+
+      <h3>补充：HTML 里三处最容易被翻出东西的地方</h3>
+
+      <div class="note secret">
+        <span class="note-tag">一 · 表单的 name 属性</span>
+        <p>
+          <code>&lt;input name="username"&gt;</code> 里的 <code>name</code>，就是后端取值的 key。
+          你在页面上填 <code>admin</code>，发出去就是 <code>username=admin</code>。
+          所以做题时先看表单有几个字段、叫什么名字 —— 那基本就是后端的参数表。
+        </p>
+      </div>
+
+      <div class="note secret">
+        <span class="note-tag">二 · 隐藏字段</span>
+        <p>
+          <code>&lt;input type="hidden" name="price" value="199"&gt;</code> 这种字段用户看不见，
+          但值明明白白躺在源码里，改一下再提交就是了。
+          凡是"价格、权限、用户 id、是否 VIP"这类东西靠隐藏字段传的，都是白给。
+        </p>
+      </div>
+
+      <div class="note secret">
+        <span class="note-tag">三 · 注释</span>
+        <p>
+          <code>&lt;!-- 测试账号 admin / admin123 --&gt;</code> 这种注释，浏览器不显示，
+          但任何人右键「查看网页源代码」都能看见。CTF 里翻注释找到 flag 是老传统。
+        </p>
+      </div>
+
+      <h3>CSS：能改的东西比你想的多</h3>
+
+      <p>
+        写法有三种：外链 <code>&lt;link rel="stylesheet" href="a.css"&gt;</code>、
+        页面内 <code>&lt;style&gt;</code>、元素上 <code>style="..."</code>。第三种优先级最高。
+      </p>
+
+      <p>
+        核心就两个词：<strong>选择器</strong>（改谁）和<strong>属性</strong>（改成什么样）。
+      </p>
+
+      <pre><code>h1 { color: #1e2a23; font-size: 2rem; }   /* 所有 h1 */
+.note { padding: 1rem; }                  /* class 叫 note 的 */
+#header { position: sticky; }             /* id 是 header 的那一个 */</code></pre>
+
+      <p>
+        CSS 在安全上出场不多，但有两个老东西值得知道：
+        <strong>点击劫持</strong>（把目标站点用透明 iframe 盖在你的按钮上，骗你点）和
+        <strong>CSS 注入</strong>（用户输入被直接拼进 style，能改页面元素甚至发出请求）。
+        先有个印象，遇到再说。
+      </p>
+
+      <h3>JavaScript：浏览器里真正会"动"的东西</h3>
+
+      <p>
+        它和 PHP、Python 一样是编程语言，只不过运行环境换成了浏览器。
+        最初只做页面特效，后来有了 Node.js，后端也能写。
+      </p>
+
+      <p>和后面最相关的四个东西：</p>
+
+      <pre><code>// 1. 找到页面上的元素
+document.getElementById('out')
+
+// 2. 改它的内容 —— 注意 innerHTML 会把字符串当 HTML 解析
+el.innerHTML = '&lt;b&gt;' + 用户输入 + '&lt;/b&gt;'   // ← XSS 的入口
+
+// 3. 聊天 —— 发请求
+fetch('/api/user?id=1').then(r =&gt; r.json()).then(console.log)
+
+// 4. 读 cookie
+document.cookie                             // ← 偷会话的第一站</code></pre>
+
+      <p>
+        记住 <code>innerHTML</code> 那一行。<strong>凡是"用户输入"被当成 HTML 塞回页面，
+        就是 XSS 的经典长相</strong>。这一讲不展开，但你会很快在题里见到它。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">前端代码是公开的</span>
+        <p>
+          这是最重要的一条认知：<strong>发给浏览器的 JS、HTML、CSS，用户可以全部拿到、全部读懂、全部修改。</strong>
+        </p>
+        <p>
+          所以前端做的任何"校验"都只是体验优化，不是安全边界。删除按钮置灰？
+          F12 改掉就是了。价格写死在前端？改一下就是了。真正的判断必须在后端做。
+        </p>
+      </div>
+
+      <p>
+        反过来说，JS 文件对我们就是一座矿：里面可能有接口地址、隐藏的管理路径、
+        云服务的 key、注释掉的测试逻辑。<strong>右键查看源码、F12 翻 Sources、全局搜 <code>api</code> 和 <code>admin</code></strong>，
+        是信息收集最便宜的第一步。
+      </p>
+
+
+      <h2 id="s-http">传书：HTTP 报文</h2>
+
+      <p>
+        前面两块是"货"和"包装"，这一块是"运"。浏览器和服务器之间真正传输的，
+        就是一段一段纯文本 —— 至少 HTTP/2 之前是这样。
+      </p>
+
+      <h3>一次请求，四个动作</h3>
+
+      <ol>
+        <li><strong>建立 TCP 连接。</strong>先握手，把路通上。</li>
+        <li><strong>发一个 HTTP 报文。</strong>就是一段有固定格式的文本。</li>
+        <li><strong>读服务端返回的报文。</strong></li>
+        <li><strong>关掉或者留着复用。</strong>HTTP/1.1 默认复用（<code>Connection: keep-alive</code>），省掉反复握手的开销。</li>
+      </ol>
+
+      <p>
+        这四步在浏览器 <em>F12 → 网络（Network）</em> 里全能看见，不用装任何工具。
+        装 Burp 的好处只是：你可以<strong>在中途把它拦下来改</strong>。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">版本演进，知道个大概就行</span>
+        <ul>
+          <li><strong>HTTP/1.1</strong>：纯文本，一问一答，同一个连接上排队。可读性最好，抓包最容易学。</li>
+          <li><strong>HTTP/2</strong>：二进制分帧，多路复用，头部压缩。人眼直接读不了，但 Burp 会帮你还原成 1.1 的样子。</li>
+          <li><strong>HTTP/3</strong>：跑在 UDP 上（QUIC）。注意 —— 它会绕过你的 HTTP 代理，抓不到包的时候先想到这一条。</li>
+        </ul>
+      </div>
+
+      <h3>请求报文：四段</h3>
+
+      <pre><code>GET /item/list?page=2 HTTP/1.1          ← ① 请求行
+Host: shop.example.com                   ← ② 请求头，一行一个
+User-Agent: Mozilla/5.0
+Accept: text/html
+Cookie: PHPSESSID=298zf09hf012fh2
+                                         ← ③ 一个空行，必须有
+                                         ← ④ 请求体（GET 一般没有）</code></pre>
+
+      <p>
+        请求行是三段：<strong>方法、路径、版本</strong>，中间用空格隔开。
+        注意路径里<em>包含查询串</em> <code>?page=2</code>，但不包含协议和主机名 ——
+        主机名在 <code>Host</code> 头里，这是 HTTP/1.1 的规矩。
+      </p>
+
+      <h3>响应报文：也四段</h3>
+
+      <pre><code>HTTP/1.1 200 OK                          ← ① 状态行
+Date: Thu, 23 Oct 2026 02:14:06 GMT      ← ② 响应头
+Server: Apache/2.4.39 (Win64) OpenSSL/1.1.1b
+Content-Type: text/html; charset=utf-8
+Content-Length: 1234
+Set-Cookie: PHPSESSID=abc123; Path=/; HttpOnly
+                                         ← ③ 空行
+&lt;!doctype html&gt;...                       ← ④ 响应体</code></pre>
+
+      <p>
+        状态行也是三段：<strong>版本、状态码、原因短语</strong>。
+        原因短语是给人看的，服务端爱写什么都行，真正的信息在数字里。
+      </p>
+
+      <h3>状态码：先记这些</h3>
+
+      <table>
+        <thead><tr><th style="width:5rem">数字</th><th style="width:9rem">名字</th><th>它通常意味着</th></tr></thead>
+        <tbody>
+          <tr><td><code>200</code></td><td>OK</td><td>成了，东西在响应体里</td></tr>
+          <tr><td><code>301</code></td><td>永久重定向</td><td>这个地址永久搬走了，去 <code>Location</code> 里那个</td></tr>
+          <tr><td><code>302</code></td><td>临时重定向</td><td>临时跳一下，登录成功跳首页最常见</td></tr>
+          <tr><td><code>304</code></td><td>未修改</td><td>你缓存里的还能用，我不重复发</td></tr>
+          <tr><td><code>400</code></td><td>请求错误</td><td>你发的东西我看不懂，格式有问题</td></tr>
+          <tr><td><code>401</code></td><td>未认证</td><td>你是谁？我没认出来</td></tr>
+          <tr><td><code>403</code></td><td>禁止</td><td>我知道你是谁，但你不准进</td></tr>
+          <tr><td><code>404</code></td><td>不存在</td><td>没这个资源</td></tr>
+          <tr><td><code>405</code></td><td>方法不允许</td><td>地址对，但你不能用这个动作（如对只读接口发 POST）</td></tr>
+          <tr><td><code>500</code></td><td>服务器内部错误</td><td>后端代码崩了</td></tr>
+          <tr><td><code>502</code></td><td>网关错误</td><td>前面那层代理连不后面那层</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note secret">
+        <span class="note-tag">从做题角度看状态码</span>
+        <ul>
+          <li><strong>301 / 302</strong> 里的 <code>Location</code> 是个跳转点。如果它接受你传进去的地址，就是<em>任意跳转</em>，能拿来钓 OAuth 的 token。</li>
+          <li><strong>401 和 403 的区别</strong>是"没认出来"和"认出来了但不让进"。有的站把 403 也当 404 返回，是为了不暴露资源存在 —— 这类差异本身就值得记一笔。</li>
+          <li><strong>500</strong> 的报错页面经常带堆栈、文件绝对路径、数据库语句。报错信息泄露是最便宜的洞。</li>
+          <li><strong>403 不等于安全</strong>。它只是这条路被挡了，换个路径、换个大写、加个 <code>/</code>、用 <code>..%2f</code>，都可能绕过去。</li>
+        </ul>
+      </div>
+
+      <h3>方法：动词决定语义</h3>
+
+      <table>
+        <thead><tr><th style="width:6rem">方法</th><th style="width:7rem">语义</th><th>用得着的地方</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET</code></td><td>取</td><td>看页面、看列表、看详情。参数在 URL 里</td></tr>
+          <tr><td><code>POST</code></td><td>交</td><td>登录、注册、下单、上传。参数在请求体里</td></tr>
+          <tr><td><code>PUT</code></td><td>改</td><td>整体替换一个资源</td></tr>
+          <tr><td><code>DELETE</code></td><td>删</td><td>删资源</td></tr>
+          <tr><td><code>HEAD</code></td><td>只要头不要体</td><td>探活、看响应头</td></tr>
+          <tr><td><code>OPTIONS</code></td><td>问你支持啥</td><td>探测允许的方法，常看 <code>Allow</code> 头</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        两个术语，知道就行：<strong>安全方法</strong>（GET、HEAD，按约定不该改数据）和
+        <strong>幂等</strong>（同样的请求发一遍和发十遍，结果一样；GET、PUT、DELETE 是，POST 不是）。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">真实世界的偏差</span>
+        <p>
+          规范是规范，实现是实现。有的站用 GET 删数据（刷新一下就删一次），
+          有的站只防了 GET 和 POST，<code>PUT</code>、<code>DELETE</code> 赤裸裸开着。
+          所以进一个站，<strong>先 <code>OPTIONS</code> 一下看 <code>Allow</code> 回了什么</strong>，比瞎猜省事。
+        </p>
+      </div>
+
+      <h3>动手：报文工坊</h3>
+
+      <p>
+        左边是一段原始 HTTP 请求，右边它会告诉你每一行是什么、哪里不对劲。
+        先把四个预设点一遍，再试着自己改坏它。
+      </p>
+
+      <div class="tool" id="packet-lab">
+        <div class="tool-bar">
+          <span class="name">拆报文</span>
+          <span class="hint">四个预设已经放在下面</span>
+        </div>
+        <div class="tool-body">
+          <div class="packet-presets">
+            <button type="button" class="chip" data-preset="plain">普通 GET</button>
+            <button type="button" class="chip" data-preset="cookie">带 Cookie</button>
+            <button type="button" class="chip" data-preset="form">POST 表单</button>
+            <button type="button" class="chip" data-preset="shady">可疑请求</button>
+          </div>
+
+          <div class="packet-grid">
+            <div class="packet-pane">
+              <div class="pane-title">请求原文</div>
+              <textarea id="packet-in" spellcheck="false" style="min-height:13rem"></textarea>
+            </div>
+            <div class="packet-pane">
+              <div class="pane-title">读出来的样子</div>
+              <div class="packet-out" id="packet-out" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="packet-findings" id="packet-findings"></div>
+        </div>
+      </div>
+
+      <h3>请求头 / 响应头：挑要紧的说</h3>
+
+      <p>
+        MDN 上列了上百个头，实际做 Web 题，翻来覆去就是下面这十来个。
+        点开来看。
+      </p>
+
+      <div class="ledger">
+
+        <details open>
+          <summary><span class="code">Host</span><span class="label">这个请求要送到哪个站</span></summary>
+          <div class="detail">
+            <p>
+              一台服务器上可能跑着几百个网站（虚拟主机）。它凭什么知道你要的是哪一个？就看 <code>Host</code>。
+              浏览器从 URL 里取主机名填进来，服务器拿它去匹配站点配置。
+            </p>
+            <p>
+              <strong>为什么它能出事：</strong>TCP 连接早就建好了，<code>Host</code> 只是"到了之后报的门牌号"，
+              而这个门牌号是客户端随便写的。所以如果后端用它来拼绝对地址 —— 比如发送密码重置邮件时
+              <code>点此重置：http://{$_SERVER['HTTP_HOST']}/reset?token=...</code> ——
+              攻击者把自己的域名填进 <code>Host</code>，用户收到的链接就指向攻击者的服务器，token 直接送上门。
+            </p>
+            <p>
+              这类问题叫 <strong>Host 头注入</strong>。相关的还有缓存投毒（CDN 按 Host 缓存，被污染的内容喂给所有人）。
+              防御很直接：用固定配置的域名，不要信任请求里的 <code>Host</code>。
+            </p>
+            <p>
+              HTTP/1.1 规定这个头<strong>必须有，且只能有一个</strong>。缺了或者多了，规范上应该回 <code>400</code> ——
+              但"规范上应该"和"实际怎么做"，往往是两回事。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Origin</span><span class="label">我是从哪个站来的</span></summary>
+          <div class="detail">
+            <p>
+              格式是 <code>协议://主机[:端口]</code>，比如 <code>Origin: https://shop.example.com</code>。
+              它只标明"来源"，不带路径，也不带查询串 —— 因为它关心的只是<strong>站点级</strong>的身份。
+            </p>
+            <p>
+              这个头<strong>主要在跨域请求（CORS）里出现，普通请求一般没有</strong>。浏览器发 <code>fetch</code> 或
+              <code>XMLHttpRequest</code> 去另一个域名时，会自动加上它，服务端用它决定要不要回
+              <code>Access-Control-Allow-Origin</code>。
+            </p>
+            <p>
+              <strong>做题视角：</strong>如果一个站的 CORS 配置成"把收到的 Origin 原样回给我，顺便允许带凭证"，
+              那就等于谁都能从自己的网页上读走用户的数据。看到 <code>Access-Control-Allow-Origin: *</code>
+              配上 <code>Allow-Credentials: true</code>，就要多看两眼。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Referer</span><span class="label">我从哪个页面点过来的</span></summary>
+          <div class="detail">
+            <p>
+              会带上来源页面的完整地址。用来做统计、防盗链、或者"只允许从本站跳转过来"。
+            </p>
+            <p>
+              <strong>注意：</strong>请求头全都可以伪造，拿 Referer 做权限校验等于没有校验。
+              反过来，Referer 会把你当前页面的地址泄露给第三方 —— 如果那个地址里刚好带着 token 或口令，就漏了。
+            </p>
+            <p>
+              （拼写确实是 Referer，当年定标准时拼错了，后来为了兼容将错就错。看到 <code>Referrer-Policy</code>
+              这个新头的时候别以为是两个东西。）
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Allow</span><span class="label">这个资源支持哪些方法</span></summary>
+          <div class="detail">
+            <p>
+              响应头，在方法不被允许时（<code>405</code>）应该一并返回，告诉你"这里只收 <code>GET, POST</code>"。
+              <code>Allow:</code> 后面是空的，意思是"啥都不收"。
+            </p>
+            <p>
+              <strong>做题视角：</strong>这是探测最省力的一个头。发一个 <code>OPTIONS</code> 过去，
+              回什么就说明后端开了什么，比一个个试快得多。
+            </p>
+          </div>
+        </details>
+
+        <details open>
+          <summary><span class="code">Cookie</span><span class="label">我带着凭证来了</span></summary>
+          <div class="detail">
+            <p>
+              浏览器自动带的。服务器之前用 <code>Set-Cookie</code> 种给它，之后每次请求到同一个域都会送回来。
+            </p>
+            <pre><code>Cookie: PHPSESSID=298zf09hf012fh2; csrftoken=u32t4o3tb3gg43; _gat=1</code></pre>
+            <p>
+              一串 <code>名字=值</code>，用分号加空格隔开。
+            </p>
+            <p>
+              <strong>核心认知：Cookie 就是你的身份本身。</strong>谁拿到那一串 <code>PHPSESSID</code>，
+              谁就是登录状态的你，服务器分不出来。所以后面所有关于 XSS、CSRF 的讨论，绕的都是这个东西。
+            </p>
+          </div>
+        </details>
+
+        <details open>
+          <summary><span class="code">Set-Cookie</span><span class="label">服务器给你种一张凭证（重点）</span></summary>
+          <div class="detail">
+            <p>响应头。要种几个 cookie，就发几行 <code>Set-Cookie</code>。它后面挂着一串属性，每个都和安全有关：</p>
+            <pre><code>Set-Cookie: session=abc123; Domain=example.com; Path=/; Max-Age=3600; HttpOnly; Secure; SameSite=Lax</code></pre>
+
+            <h4>Domain（可选，但很关键）</h4>
+            <p>
+              指定这张 cookie 能送给哪些主机。设成 <code>example.com</code>，那么
+              <code>www.example.com</code>、<code>mail.example.com</code>、<code>blog.example.com</code>
+              <strong>全都能收到</strong>。不设的话，默认只给当前这个主机，不包括子域。
+            </p>
+            <p>
+              所以：<strong>Domain 设得越宽，泄露面越大</strong>。主站和一堆子域共享同一张会话 cookie，
+              只要任何一个子域被拿下（或者子域上有个可以写 HTML 的地方），这张 cookie 就归人家了。
+              这叫「子域接管」式的会话劫持。
+            </p>
+
+            <h4>HttpOnly</h4>
+            <p>
+              加了它，JavaScript 的 <code>document.cookie</code> 就读不到这张 cookie 了。
+              这是专门用来防 XSS 偷 cookie 的。
+            </p>
+            <p>
+              <strong>但别误会：</strong>HttpOnly 只是不让 JS 读，浏览器发请求的时候照样会带上它。
+              所以它挡不住 CSRF（CSRF 利用的正是"自动带上"这个特性），也挡不住 XSS 在页面里直接发请求。
+            </p>
+
+            <h4>Secure</h4>
+            <p>
+              只在 HTTPS 连接上发送。没这个属性，同网段的人抓个明文包就能拿到。
+            </p>
+
+            <h4>SameSite（CSRF 的重点）</h4>
+            <p>控制这张 cookie 会不会跟着<em>跨站</em>请求一起发出去。三个值：</p>
+            <ul>
+              <li>
+                <strong>Strict</strong> —— 最严。只有从本站在页面上发起的请求才带它。
+                从外站点个链接过来，第一次请求不带 cookie，用户看到的是"未登录"状态，得再点一下。
+                体验差一点，最安全。
+              </li>
+              <li>
+                <strong>Lax</strong> —— 默认值（现在浏览器默认就是它）。跨站的
+                <em>顶层导航</em>（点链接跳过来）会带，但跨站加载图片、iframe、发起
+                <code>fetch</code> 都不带。
+              </li>
+              <li>
+                <strong>None</strong> —— 跨站也照带不误。设它的时候<strong>必须同时设 Secure</strong>，
+                否则浏览器直接拒绝这张 cookie。
+              </li>
+            </ul>
+            <p>
+              <strong>为什么这个属性是 CSRF 的关键：</strong>CSRF 的攻击方式就是"诱导你在已登录的状态下，
+              向目标站发一个不是你本意的请求"。如果目标站的会话 cookie 是 <code>SameSite=None</code>，
+              那么你在 <code>evil.com</code> 打开一个隐藏表单往银行站提交，浏览器会把银行的 cookie 一起带上 ——
+              银行看到的就是"你本人操作"。把它改成 <code>Lax</code> 或 <code>Strict</code>，
+              这条攻击链就断了一大半。
+            </p>
+          </div>
+        </details>
+
+        <details open>
+          <summary><span class="code">X-Forwarded-For</span><span class="label">我的真实 IP 是……（谁能证明）</span></summary>
+          <div class="detail">
+            <p>
+              请求经过代理、CDN、负载均衡之后，服务器看到的只有最后一跳的 IP。
+              为了把"真实客户端 IP"传下去，就加了这个头，格式是从左到右一路排下去：
+            </p>
+            <pre><code>X-Forwarded-For: 203.0.113.195, 2001:db8:85a3::8d3:1319, 150.172.238.178</code></pre>
+            <p>
+              最左边是原始客户端，最右边是最近一跳的代理。
+            </p>
+            <p>
+              <strong>问题在于：这个头是客户端可以自己写的。</strong>而且如果代理只是"在末尾追加"，
+              那攻击者随手填一个 <code>127.0.0.1</code> 在开头，后面跟着的可能是真的 IP ——
+              后端要是取最左边那个来判权限，就被骗了。
+            </p>
+            <p>
+              <strong>所以：</strong>只信任它的服务端，等于把"我是谁"交给攻击者填。
+              后台白名单、限流、"仅内网可访问"这类判断，都可能是这个头的受害者。
+            </p>
+            <p>
+              同类的还有 <code>X-Real-IP</code>、<code>Forwarded</code>、<code>Client-IP</code>、
+              <code>X-Originating-IP</code>、<code>X-Remote-Addr</code> —— 见到名字像"IP"的请求头，
+              先假设它可伪造。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">User-Agent</span><span class="label">我是什么浏览器（自述）</span></summary>
+          <div class="detail">
+            <p>
+              客户端自报家门：浏览器、版本、操作系统。服务端常拿它判断设备类型、要不要给手机版。
+            </p>
+            <p>
+              它同样可以随便改。<strong>有些站的"只有手机能访问"、后台爬虫识别、移动端专用接口，
+              都是靠 UA 判的</strong> —— 改成 <code>Mozilla/5.0 (iPhone; CPU iPhone OS ...)</code> 就过去了。
+              这类题在 CTF 里很常见，判断依据就是这一条。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Content-Type</span><span class="label">我发的是什么格式</span></summary>
+          <div class="detail">
+            <p>请求体和响应体的格式声明。最常见几种：</p>
+            <ul>
+              <li><code>application/x-www-form-urlencoded</code> —— 普通表单，长得像 <code>a=1&amp;b=2</code></li>
+              <li><code>multipart/form-data</code> —— 带文件上传的表单</li>
+              <li><code>application/json</code> —— 前后端分离的接口</li>
+            </ul>
+            <p>
+              <strong>安全视角：</strong>后端经常按 <code>Content-Type</code> 决定用哪套解析逻辑。
+              把 JSON 接口的请求改成 <code>application/x-www-form-urlencoded</code>，可能走到另一个解析器上，
+              绕过某处校验 —— 这类"解析器不一致"是很多绕过的源头。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Content-Length / Transfer-Encoding</span><span class="label">我这个包有多长（两个大哥）</span></summary>
+          <div class="detail">
+            <p>
+              <code>Content-Length</code> 说"我的体有多少字节"；
+              <code>Transfer-Encoding: chunked</code> 说"我的体是分块发的，不用给长度"。
+            </p>
+            <p>
+              正常情况下这两个不会同时出现。如果同时出现，或者前后端对"该信哪一个"理解不一致，
+              就有一小段请求被"切"到下一次请求里 —— 这就是<strong>请求走私（HTTP Request Smuggling）</strong>，
+              能让攻击者劫持别人的请求。入门阶段知道有这回事即可，真遇到再深挖。
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary><span class="code">Server / X-Powered-By</span><span class="label">我用的是什么（免费广告）</span></summary>
+          <div class="detail">
+            <p>
+              前面那个例子里，<code>Server: Apache/2.4.39 (Win64) OpenSSL/1.1.1b</code>
+              把版本号、操作系统、SSL 库版本全写出来了。
+            </p>
+            <p>
+              这叫 <strong>banner 泄露</strong>。对攻击者来说，这一步等于免费的指纹识别：
+              知道是 Apache 2.4.39，就去查这个版本的已知漏洞；知道是 PHP 7.x，就知道哪些函数的行为。
+            </p>
+            <p>
+              防御方式是关掉或改成假信息。做信息收集时，<strong>第一个要看的就是响应头里的这一行</strong>。
+            </p>
+          </div>
+        </details>
+
+      </div>
+
+      <h3>串起来看：一次典型的"改了就进"</h3>
+
+      <p>
+        把上面这些拼起来，就是新人遇到的第一个真实场景：
+      </p>
+
+      <ol>
+        <li>你用普通账号登录，Burp 里看到响应里有 <code>Set-Cookie: role=user</code>。</li>
+        <li>你翻一个只有管理员能进的页面，返回 <code>403</code>。</li>
+        <li>你把请求里的 <code>Cookie: role=user</code> 改成 <code>role=admin</code>，重发。</li>
+        <li>返回 <code>200</code>，页面出来了。</li>
+      </ol>
+
+      <p>
+        这说明后端<strong>直接信任了客户端送来的 <code>role</code></strong>，而且它是明文存的。
+        这在专业上叫<em>垂直越权</em>；如果改的是 <code>user_id=2</code> 看上别人的订单，那叫<em>水平越权</em>。
+        名字不重要，记住这个模式：<strong>凡是客户端能改的东西，都不该被当作权限的依据。</strong>
+      </p>
+
+
+      <h2 id="s-docker">开炉：用 Docker 起一个靶场</h2>
+
+      <p>
+        CTF 题目一般会给你一个 <code>Dockerfile</code> 或 <code>docker-compose.yml</code>，
+        几行命令就能在本机把出题人的环境原样跑起来。这一节讲怎么用。
+      </p>
+
+      <h3>镜像和容器，一句话分清</h3>
+
+      <ul>
+        <li><strong>镜像（image）</strong> —— 一个打包好的、只读的系统快照，里面装着代码和依赖。相当于"光盘"。</li>
+        <li><strong>容器（container）</strong> —— 用镜像跑起来的一个实例，可读可写，跑完一删就干净。相当于"放进光驱播放"。</li>
+      </ul>
+
+      <p>
+        同一个镜像可以开出十个容器，互不干扰。这就是它比"在本机直接装一遍"好的地方：
+        环境一致、不怕装坏、删掉不留痕。
+      </p>
+
+      <h3>Dockerfile 长什么样</h3>
+
+      <pre><code>FROM python:3.11          # 从哪个底包开始
+WORKDIR /app              # 容器里的工作目录
+COPY . .                  # 把当前目录的东西拷进去
+RUN pip install flask     # 构建时执行一条命令
+EXPOSE 5000               # 声明用哪个端口（只是声明）
+CMD ["python", "app.py"]  # 启动时执行的命令</code></pre>
+
+      <table>
+        <thead><tr><th style="width:9rem">指令</th><th>干什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>FROM</code></td><td>基于哪个镜像开始。每条 Dockerfile 必须从这开始</td></tr>
+          <tr><td><code>WORKDIR</code></td><td>设定之后命令的工作目录，不存在会自动建</td></tr>
+          <tr><td><code>COPY</code></td><td>从宿主机把文件复制进镜像</td></tr>
+          <tr><td><code>RUN</code></td><td><strong>构建时</strong>执行，结果被写进镜像</td></tr>
+          <tr><td><code>EXPOSE</code></td><td>声明容器内监听哪个端口（文档性质，不真的开端口）</td></tr>
+          <tr><td><code>CMD</code></td><td><strong>启动时</strong>执行，一个 Dockerfile 只有一个</td></tr>
+        </tbody>
+      </table>
+
+      <h3>两条命令跑起来</h3>
+
+      <pre><code># ① 构镜像：在当前目录找 Dockerfile，打上名字 ctf-web
+docker build -t ctf-web .
+
+# ② 起容器：把宿主机的 8080 接到容器的 5000
+docker run -d -p 8080:5000 --name ctf ctf-web</code></pre>
+
+      <p>
+        <code>-p 8080:5000</code> 是<strong>宿主机端口 : 容器端口</strong>，顺序别记反。
+        起来之后浏览器访问 <code>http://127.0.0.1:8080</code> 就是那台靶机。
+      </p>
+
+      <h3>常用命令，抄下来就够</h3>
+
+      <pre><code>docker images           # 本地有哪些镜像
+docker ps -a            # 所有容器（含已停止的）
+docker logs ctf         # 看容器输出，起不来先看这个
+docker exec -it ctf sh  # 钻进容器里看文件
+docker stop ctf         # 停
+docker rm ctf           # 删（要先停）
+docker rm -f ctf        # 停并删
+docker rmi ctf-web      # 删镜像</code></pre>
+
+      <p>
+        如果题目给的是 <code>docker-compose.yml</code>（多服务，比如 web + db），那更省事：
+      </p>
+
+      <pre><code>docker compose up -d --build   # 构建并后台启动
+docker compose down            # 停掉并删干净</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">Windows 上的两个坑</span>
+        <ul>
+          <li>Docker Desktop 要先开 WSL2 或 Hyper-V，装之前先确认。装完重启一次。</li>
+          <li>容器里跑的服务如果只听 <code>127.0.0.1</code>，宿主机映射端口也访问不到 ——
+              服务要监听 <code>0.0.0.0</code>。</li>
+        </ul>
+      </div>
+
+      <p>
+        一句话总结这一节：<strong>看 Dockerfile 了解环境 → build 构镜像 → run 起容器 → 本地访问调试</strong>。
+      </p>
+
+
+      <h2 id="s-lab">演武：自己搭一个靶场，再亲手打一遍</h2>
+
+      <p>
+        装 phpstudy 那一步，很多人装完就不知道拿它干什么了。这里给一个更好上手的东西：
+        一个<strong>只有两百行、只用 Python 标准库</strong>的靶场，不用装任何依赖，
+        不用 Docker，双击就能跑。
+      </p>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>起靶场（预计 2 分钟）</h3>
+        </div>
+
+        <ol class="step">
+          <li>
+            确认本机有 Python（3.8 以上都行）：
+            <div class="cmd"><code>python --version</code></div>
+          </li>
+          <li>
+            在仓库根目录下，把靶场跑起来：
+            <div class="cmd"><code>python lab/zhulin_lab.py</code></div>
+            看到 <code>靶场已开，去 http://127.0.0.1:8081</code> 就成了。
+          </li>
+          <li>
+            浏览器开 <code>http://127.0.0.1:8081</code>，你会看到四道门。每道门背后一段 flag。
+          </li>
+          <li>
+            打不通的时候，<strong>先别急着换工具</strong>。回到 Burp 或 F12 里，把请求一个字一个字读完，
+            看看服务端到底在检查什么。
+          </li>
+        </ol>
+      </div>
+
+      <h3>四道门，四样毛病</h3>
+
+      <table>
+        <thead><tr><th style="width:5rem">门</th><th style="width:9rem">它信了什么</th><th>怎么过</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>/gate/1</code></td>
+            <td>信了 <code>X-Forwarded-For</code></td>
+            <td>加一个头 <code>X-Forwarded-For: 127.0.0.1</code>。浏览器里加不了，用 <code>curl</code> 或 Burp。</td>
+          </tr>
+          <tr>
+            <td><code>/gate/2</code></td>
+            <td>信了 <code>Host</code></td>
+            <td>把 <code>Host</code> 改成 <code>admin.internal</code>。域名随便写，反正没人真的解析它。</td>
+          </tr>
+          <tr>
+            <td><code>/gate/3</code></td>
+            <td>信了 <code>Cookie</code></td>
+            <td>F12 → Application → Cookie，把 <code>role</code> 改成 <code>admin</code>；或者直接改请求头。</td>
+          </tr>
+          <tr>
+            <td><code>/download</code></td>
+            <td>没做路径规范化</td>
+            <td>正常是 <code>?file=notice.txt</code>。试试 <code>?file=../flag.txt</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        四道门依次对应你刚学的四样东西：<strong>XFF、Host、Cookie、路径</strong>。
+        打不过是正常的，卡住了就往下看代码 —— 墙是自己砌的，砖在哪儿一清二楚。
+      </p>
+
+      <h3>工具：三样，从简到繁</h3>
+
+      <ol class="step">
+        <li>
+          <strong>浏览器 F12。</strong>Network 面板可以右键请求 → Copy → Copy as cURL，或者
+          Edge/Chrome 的「Edit and Resend」直接改头重发。够用。
+        </li>
+        <li>
+          <strong>curl。</strong>命令行里改头最方便：
+          <div class="cmd"><code>curl -H "X-Forwarded-For: 127.0.0.1" http://127.0.0.1:8081/gate/1</code></div>
+        </li>
+        <li>
+          <strong>Burp。</strong>Proxy 里看到请求 → 右键 Send to Repeater → 改头 → Send。
+          这是以后天天要用的姿势。
+        </li>
+      </ol>
+
+      <h3>靶场的核心逻辑</h3>
+
+      <p>
+        完整脚本在仓库的 <code>lab/zhulin_lab.py</code>，可以直接下载下来跑。这里贴最关键的两段：
+      </p>
+
+      <div class="labfile">
+        <div class="tab"><span>lab/zhulin_lab.py</span><span class="dot3">节选</span></div>
+<pre><code># 第一关：只看 X-Forwarded-For，而且只认第一个
+xff = self.headers.get('X-Forwarded-For', '')
+if xff.split(',')[0].strip() == '127.0.0.1':
+    return self.reply(200, FLAG_1)
+return self.reply(403, '只给本机看。')</code></pre>
+      </div>
+
+      <div class="labfile">
+        <div class="tab"><span>lab/zhulin_lab.py</span><span class="dot3">节选</span></div>
+<pre><code># 下载：把用户给的路径直接拼上来，没有做规范化
+base = os.path.join(os.path.dirname(__file__), 'public')
+target = os.path.join(base, name)          # name 完全来自 query
+# 正常是 public/notice.txt，但 name 可以写成 ../flag.txt
+with open(target, 'r', encoding='utf-8') as f:
+    return self.reply(200, f.read())</code></pre>
+      </div>
+
+      <p>
+        看懂这两段，你就懂了这类漏洞的通用形状：<strong>用户输入 + 直接信任 + 没有校验 = 洞</strong>。
+        后面所有的注入、穿越、越权，本质都是这一句话的不同变体。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">打完回头看</span>
+        <p>
+          这四关的修法，分别是：<code>X-Forwarded-For</code> 只从可信代理取、<code>Host</code> 用白名单、
+          权限状态存服务端会话而不是 cookie、路径先 <code>realpath</code> 再判断是否还在基目录内。
+          记住修法，比记住攻击方式有用。
+        </p>
+      </div>
+
+
+      <h2 id="s-homework">作业</h2>
+
+      <p>勾上就会记在本机，下次打开还在。</p>
+
+      <ul class="checkable">
+        <li>
+          <input type="checkbox" id="hw1" data-k="capture">
+          <label for="hw1"><strong>抓到你人生第一个包。</strong>用 Burp 内嵌浏览器随便开个网页，
+          Proxy → HTTP history 里看到请求后截图。截图里要能看见请求行和至少三个头。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw2" data-k="mdn">
+          <label for="hw2"><strong>把 MDN 那几页翻一遍。</strong>
+          <a href="https://developer.mozilla.org/zh-CN/docs/Learn_web_development/Getting_started" target="_blank" rel="noopener">入门教程</a>、
+          <a href="https://developer.mozilla.org/zh-CN/docs/Web/HTTP" target="_blank" rel="noopener">HTTP 总览</a>。
+          不用背，知道"这块东西该去哪查"就够了。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw3" data-k="ctfhub">
+          <label for="hw3"><strong>CTFHub 的「Web 前置技能 → HTTP 协议」五道题全做完。</strong>
+          在 <a href="https://www.ctfhub.com/#/skilltree" target="_blank" rel="noopener">技能树</a> 里，
+          做完截一张带自己 ID 的图。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw4" data-k="lab">
+          <label for="hw4"><strong>把上面那个靶场的四道门打通。</strong>四段 flag 截图。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw5" data-k="csrf">
+          <label for="hw5"><strong>（选做）</strong>读一遍
+          <a href="https://book.jorianwoltjer.com/web/client-side/cross-site-request-forgery-csrf" target="_blank" rel="noopener">CSRF 那一章</a>。
+          下一讲会用到 <code>SameSite</code> 那儿的知识。</label>
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">下一讲会讲什么</span>
+        <p>
+          这一讲把"看得懂"这件事做完了。下一讲大概率从<strong>注入</strong>或者
+          <strong>XSS</strong> 开始 —— 到时候你会发现，绕来绕去还是这一讲里的三样东西：
+          一个参数进到了哪儿、一段内容被当成什么解析、一张凭证被谁拿走了。
+        </p>
+      </div>
+
+
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">这一讲下面留个话，同门都看得到（接上 giscus 之后）</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本卷目录</h4>
+      <ul class="side-toc">
+        <li><a href="#s-intro">这一讲在讲什么</a></li>
+        <li><a href="#s-tools">一 · 先把家伙备齐</a></li>
+        <li><a href="#s-burp">二 · Burp 从装到改包</a></li>
+        <li><a href="#s-hackbar">三 · HackBar</a></li>
+        <li><a href="#s-others">四 · 剩下三样</a></li>
+        <li><a href="#s-url">五 · URL 拆成七段</a></li>
+        <li><a href="#s-front">六 · HTML/CSS/JS</a></li>
+        <li><a href="#s-http">七 · HTTP 报文</a></li>
+        <li><a href="#s-docker">八 · Docker 靶场</a></li>
+        <li><a href="#s-lab">九 · 自己打一遍</a></li>
+        <li><a href="#s-homework">十 · 作业</a></li>
+      </ul>
+    </div>
+
+    <div class="side-block">
+      <h4>读了几成</h4>
+      <div class="progress-ring" data-progress-ring>
+        <svg width="42" height="42" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"></circle>
+          <circle class="ring-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"
+                  stroke-linecap="round" transform="rotate(-90 18 18)"
+                  style="stroke-dasharray:97.39;stroke-dashoffset:97.39"></circle>
+        </svg>
+        <span class="num"><b data-progress-num>0/0</b>作业打了勾</span>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 其一 &middot; 前端基础以及基本工具的使用</p>
+  <p class="colophon">所有实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="../assets/js/site-config.js"></script>
+<script src="../assets/js/widgets.js"></script>
+<script src="../assets/js/comments.js"></script>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>
