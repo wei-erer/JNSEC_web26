@@ -1443,11 +1443,16 @@ docker compose down            # 停掉并删干净</code></pre>
         </ol>
 
         <div class="note pit">
-          <span class="note-tag">存的时候留神两件事</span>
+          <span class="note-tag">存的时候留神三件事</span>
           <ul>
             <li>
               文件名得是 <code>zhulin_lab.py</code>，后缀 <code>.py</code>。
               Windows 记事本默认会存成 <code>.py.txt</code> —— 保存时把「保存类型」改成「所有文件」。
+            </li>
+            <li>
+              自己复制粘贴的话，保存时把编码选成 <strong>UTF-8</strong>。
+              存成 ANSI 会让脚本里的中文变成乱码，一跑就报错。
+              （Windows 10 之后的记事本默认就是 UTF-8，一般不用管。）
             </li>
             <li>下载来的是纯代码，别用 Word 打开。记事本、VS Code、Notepad++ 都行。</li>
           </ul>
