@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-竹隐靶场 · 第一次例会配套
+竹隐靶场 · Web 方向第一讲配套
 ────────────────────────────────────────────────
 只依赖 Python 标准库，不用 Docker，不用装任何东西。
 
-跑起来：
-    python lab/zhulin_lab.py
+跑起来（先 cd 到这个文件所在的文件夹）：
+    python zhulin_lab.py
+
+文件名必须叫 zhulin_lab.py，后缀是 .py。Windows 记事本默认会存成 .py.txt。
 
 然后浏览器开 http://127.0.0.1:8081
 

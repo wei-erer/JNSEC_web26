@@ -339,8 +339,8 @@ Upgrade-Insecure-Requests: 1</code></pre>
         </div>
         <ol class="step">
           <li>
-            先把靶场跑起来：
-            <div class="cmd"><code>python lab/zhulin_lab.py</code></div>
+            先把靶场跑起来（文件怎么拿，见第九节开头的「第零步」）：
+            <div class="cmd"><code>python zhulin_lab.py</code></div>
           </li>
           <li>火狐访问 <code>http://127.0.0.1:8081/gate/2</code>，页面显示"不让进"。</li>
           <li>
@@ -480,7 +480,7 @@ Upgrade-Insecure-Requests: 1</code></pre>
         </div>
         <ol class="step">
           <li>
-            靶场跑起来（<code>python lab/zhulin_lab.py</code>），火狐打开：
+            靶场跑起来（同样见第九节「第零步」），火狐打开：
             <div class="cmd"><code>http://127.0.0.1:8081/download?file=notice.txt</code></div>
             页面显示通知内容的全文。
           </li>
@@ -1408,33 +1408,79 @@ docker compose down            # 停掉并删干净</code></pre>
       <h2 id="s-lab">演武：自己搭一个靶场，再亲手打一遍</h2>
 
       <p>
-        装 phpstudy 那一步，很多人装完就不知道拿它干什么了。这里给一个更好上手的东西：
-        一个<strong>只有两百行、只用 Python 标准库</strong>的靶场，不用装任何依赖，
-        不用 Docker，双击就能跑。
+        前面的 phpstudy 装完，很多人不知道拿它干什么。这里给一个更好上手的东西：
+        一个<strong>两百来行、只用 Python 标准库</strong>的靶场 —— 不用 Docker，不用 pip，
+        有 Python 就能跑。
       </p>
 
       <div class="lab">
         <div class="lab-sign">
           <span class="stamp">实操</span>
-          <h3>起靶场（预计 2 分钟）</h3>
+          <h3>第零步：把靶场文件拿到本地</h3>
+        </div>
+
+        <p>
+          下面那条命令跑的是一个叫 <code>zhulin_lab.py</code> 的文件。你电脑上得先有它，
+          否则敲什么都是"找不到文件"。三种拿法，挑一个：
+        </p>
+
+        <ol class="step">
+          <li>
+            <strong>直接下载</strong>（最省事）。点下面这个地址，浏览器会把它存下来：
+            <div class="cmd wrap"><code>https://wei-erer.github.io/JNSEC_web26/lab/zhulin_lab.py</code></div>
+            新建一个空文件夹放它。跑起来之后，同一个目录里会多出 <code>flag.txt</code> 和
+            <code>public/</code> 两样东西 —— 免得它们落在桌面上。
+          </li>
+          <li>
+            <strong>从 GitHub 拿</strong>。打开这个页面，右上角有个
+            <strong>Download raw file</strong>（向下的箭头）：
+            <div class="cmd wrap"><code>https://github.com/wei-erer/JNSEC_web26/blob/main/lab/zhulin_lab.py</code></div>
+          </li>
+          <li>
+            <strong>复制粘贴</strong>。本节最后有完整代码，点右上角「抄」，
+            在本地新建一个文本文件粘进去，存成 <code>zhulin_lab.py</code>。
+          </li>
+        </ol>
+
+        <div class="note pit">
+          <span class="note-tag">存的时候留神两件事</span>
+          <ul>
+            <li>
+              文件名得是 <code>zhulin_lab.py</code>，后缀 <code>.py</code>。
+              Windows 记事本默认会存成 <code>.py.txt</code> —— 保存时把「保存类型」改成「所有文件」。
+            </li>
+            <li>下载来的是纯代码，别用 Word 打开。记事本、VS Code、Notepad++ 都行。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>第一步：跑起来（预计 2 分钟）</h3>
         </div>
 
         <ol class="step">
           <li>
             确认本机有 Python（3.8 以上都行）：
             <div class="cmd"><code>python --version</code></div>
+            没装的话去 <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a> 下一个，
+            安装时记得勾上 <strong>Add Python to PATH</strong>。
           </li>
           <li>
-            在仓库根目录下，把靶场跑起来：
-            <div class="cmd"><code>python lab/zhulin_lab.py</code></div>
+            <strong>打开命令行，切到那个文件所在的文件夹</strong>，再运行：
+            <div class="cmd"><code>python zhulin_lab.py</code></div>
             看到 <code>靶场已开，去 http://127.0.0.1:8081</code> 就成了。
+            <br>
+            不想敲 <code>cd</code> 的话：在文件夹窗口的地址栏里输 <code>cmd</code> 回车，
+            命令行会直接开在这个目录。
           </li>
           <li>
-            浏览器开 <code>http://127.0.0.1:8081</code>，你会看到四道门。每道门背后一段 flag。
+            浏览器开 <code>http://127.0.0.1:8081</code>，四道门。每道门背后一段 flag。
           </li>
           <li>
-            打不通的时候，<strong>先别急着换工具</strong>。回到 Burp 或 F12 里，把请求一个字一个字读完，
-            看看服务端到底在检查什么。
+            打不通的时候，<strong>先别急着换工具</strong>。回到 Burp 或 F12 里，
+            把请求一个字一个字读完，看看服务端到底在检查什么。
           </li>
         </ol>
       </div>
@@ -1492,7 +1538,7 @@ docker compose down            # 停掉并删干净</code></pre>
       <h3>靶场的核心逻辑</h3>
 
       <p>
-        完整脚本在仓库的 <code>lab/zhulin_lab.py</code>，可以直接下载下来跑。这里贴最关键的两段：
+        先看两段最关键的。写这几行的人当时在想什么，比代码本身有意思：
       </p>
 
       <div class="labfile">
@@ -1518,6 +1564,291 @@ with open(target, 'r', encoding='utf-8') as f:
         看懂这两段，你就懂了这类漏洞的通用形状：<strong>用户输入 + 直接信任 + 没有校验 = 洞</strong>。
         后面所有的注入、穿越、越权，本质都是这一句话的不同变体。
       </p>
+
+      <details class="codefold">
+        <summary>展开完整靶场代码（两百来行，想读就翻）</summary>
+        <div class="labfile">
+          <div class="tab"><span>zhulin_lab.py</span><span class="dot3">完整 · 可复制</span></div>
+<pre><code>#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+竹隐靶场 · Web 方向第一讲配套
+────────────────────────────────────────────────
+只依赖 Python 标准库，不用 Docker，不用装任何东西。
+
+跑起来（先 cd 到这个文件所在的文件夹）：
+    python zhulin_lab.py
+
+文件名必须叫 zhulin_lab.py，后缀是 .py。Windows 记事本默认会存成 .py.txt。
+
+然后浏览器开 http://127.0.0.1:8081
+
+四道门，四样毛病：
+    /gate/1      信了 X-Forwarded-For
+    /gate/2      信了 Host
+    /gate/3      信了 Cookie
+    /download    没做路径规范化
+
+这个靶场是故意写漏的，只为练习。别拿它的写法去写线上服务。
+"""
+
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+from html import escape
+
+HOST = "127.0.0.1"
+PORT = 8081
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+PUBLIC = os.path.join(BASE, "public")
+
+FLAGS = {
+    1: "flag{zhulin_xff_is_just_a_header}",
+    2: "flag{zhulin_host_you_can_say_anything}",
+    3: "flag{zhulin_cookie_is_your_id}",
+    4: "flag{zhulin_dot_dot_slash}",
+}
+
+# ──────────────────────────────────────────────
+# 页面外壳
+# ──────────────────────────────────────────────
+SHELL = """&lt;!doctype html&gt;
+&lt;html lang="zh-CN"&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width,initial-scale=1"&gt;
+&lt;title&gt;竹隐靶场 · {title}&lt;/title&gt;
+&lt;style&gt;
+  :root {{
+    --paper:#f5f0e4; --ink:#1e2a23; --soft:#6d7a6f;
+    --bamboo:#4f6f52; --deep:#2c4234; --cinnabar:#a83a2c;
+  }}
+  * {{ box-sizing:border-box; }}
+  body {{
+    margin:0; min-height:100vh; padding:clamp(1.4rem,6vw,4rem) 1.2rem 4rem;
+    background:var(--paper);
+    background-image:
+      radial-gradient(900px 600px at 10% -10%, rgba(255,255,255,.8), transparent 60%),
+      radial-gradient(900px 700px at 100% 100%, rgba(79,111,82,.10), transparent 60%);
+    color:var(--ink); font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    line-height:1.9; font-size:16px;
+  }}
+  .wrap {{ max-width:640px; margin:0 auto; }}
+  .seal {{
+    display:inline-grid; place-items:center; width:2rem; height:2rem;
+    background:var(--cinnabar); color:#f8f2e6; border-radius:2px;
+    font-family:KaiTi,STKaiti,serif; font-size:1.1rem; transform:rotate(-2deg);
+  }}
+  header {{ display:flex; align-items:center; gap:.7rem; margin-bottom:.4rem; }}
+  header b {{ font-family:KaiTi,STKaiti,serif; font-size:1.15rem; letter-spacing:.16em; }}
+  .sub {{ color:var(--soft); font-size:.8rem; letter-spacing:.2em; margin:0 0 2rem 2.7rem; }}
+  h1 {{
+    font-family:Songti SC,SimSun,serif; font-size:1.5rem; font-weight:600;
+    letter-spacing:.04em; margin:0 0 1rem;
+  }}
+  p {{ margin:0 0 1rem; }}
+  code {{
+    font-family:Consolas,monospace; font-size:.88em;
+    background:rgba(79,111,82,.10); padding:.1em .38em; border-radius:2px;
+    color:var(--deep);
+  }}
+  a {{ color:var(--bamboo); text-underline-offset:3px; }}
+  .gate {{
+    display:block; padding:.9rem 1.1rem; margin-bottom:.7rem;
+    border:1px solid rgba(79,111,82,.25); border-radius:3px;
+    background:rgba(255,255,255,.5); text-decoration:none; color:inherit;
+  }}
+  .gate:hover {{ border-color:rgba(79,111,82,.5); background:#fff; }}
+  .gate b {{ font-family:Songti SC,SimSun,serif; }}
+  .gate span {{ display:block; color:var(--soft); font-size:.85rem; }}
+  .flag {{
+    margin:1.4rem 0; padding:1rem 1.2rem;
+    background:#222d26; color:#b7e0a5; border-radius:3px;
+    font-family:Consolas,monospace; font-size:.95rem; word-break:break-all;
+  }}
+  .no {{
+    margin:1.4rem 0; padding:.9rem 1.1rem;
+    border-left:2px solid var(--cinnabar);
+    background:rgba(168,58,44,.06);
+  }}
+  .back {{ display:inline-block; margin-top:1.6rem; color:var(--soft); font-size:.85rem; }}
+  .tip {{ color:var(--soft); font-size:.82rem; margin-top:2rem; }}
+&lt;/style&gt;&lt;/head&gt;
+&lt;body&gt;&lt;div class="wrap"&gt;
+  &lt;header&gt;&lt;span class="seal"&gt;竹&lt;/span&gt;&lt;b&gt;竹隐靶场&lt;/b&gt;&lt;/header&gt;
+  &lt;p class="sub"&gt;第一次例会 · 自己打自己&lt;/p&gt;
+  {body}
+  &lt;a class="back" href="/"&gt;← 回到门口&lt;/a&gt;
+  &lt;p class="tip"&gt;这个靶场是故意写漏的，只用来练习。别拿它的写法去写线上服务。&lt;/p&gt;
+&lt;/div&gt;&lt;/body&gt;&lt;/html&gt;"""
+
+
+def page(title, body):
+    return SHELL.format(title=escape(title), body=body).encode("utf-8")
+
+
+HOME = """
+&lt;h1&gt;四道门&lt;/h1&gt;
+&lt;p&gt;每道门后面有一段 flag。四道门，四样毛病，都在第一次例会讲过。&lt;/p&gt;
+&lt;a class="gate" href="/gate/1"&gt;&lt;b&gt;其一 · 门牌&lt;/b&gt;&lt;span&gt;它说"只给本机看"。可它怎么知道你是本机？&lt;/span&gt;&lt;/a&gt;
+&lt;a class="gate" href="/gate/2"&gt;&lt;b&gt;其二 · 内宅&lt;/b&gt;&lt;span&gt;它认门牌号。而门牌号，是你自己写的。&lt;/span&gt;&lt;/a&gt;
+&lt;a class="gate" href="/gate/3"&gt;&lt;b&gt;其三 · 腰牌&lt;/b&gt;&lt;span&gt;它看你的腰牌。腰牌上的字，也是你自己写的。&lt;/span&gt;&lt;/a&gt;
+&lt;a class="gate" href="/download?file=notice.txt"&gt;&lt;b&gt;其四 · 后门&lt;/b&gt;&lt;span&gt;它帮你从柜子里拿文件。柜子外面还有一层吗？&lt;/span&gt;&lt;/a&gt;
+"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    # 关掉默认的日志格式，换成一行中文的
+    def log_message(self, fmt, *args):
+        sys.stdout.write("  %s  %s\n" % (self.address_string(), fmt % args))
+
+    # ---------- 回复工具 ----------
+    def reply(self, code, body_html, extra_headers=None):
+        if isinstance(body_html, str):
+            body = page("结果", body_html)
+        else:
+            body = body_html
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Server", "ZhulinLab/0.1 (Python)")
+        for k, v in (extra_headers or []):
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def flag_block(self, n):
+        return '&lt;h1&gt;门开了&lt;/h1&gt;&lt;p&gt;这一关的 flag 收好：&lt;/p&gt;&lt;div class="flag"&gt;%s&lt;/div&gt;' % escape(FLAGS[n])
+
+    def deny(self, why):
+        return '&lt;h1&gt;不让进&lt;/h1&gt;&lt;div class="no"&gt;%s&lt;/div&gt;' % why
+
+    def not_found(self):
+        return '&lt;h1&gt;404&lt;/h1&gt;&lt;p&gt;没有这个东西。&lt;/p&gt;'
+
+    # ---------- 解析 cookie ----------
+    def cookies(self):
+        jar = {}
+        raw = self.headers.get("Cookie", "")
+        for piece in raw.split(";"):
+            piece = piece.strip()
+            if not piece or "=" not in piece:
+                continue
+            k, v = piece.split("=", 1)
+            jar[k.strip()] = v.strip()
+        return jar
+
+    # ---------- 路由 ----------
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path in ("/", "/index.html"):
+            return self.reply(200, HOME)
+
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        # ── 第一关：只认 X-Forwarded-For 的第一个值 ──
+        if path == "/gate/1":
+            xff = self.headers.get("X-Forwarded-For", "")
+            first = xff.split(",")[0].strip()
+            if first == "127.0.0.1":
+                return self.reply(200, self.flag_block(1))
+            return self.reply(403, self.deny(
+                "这是内网接口，只给本机看。&lt;br&gt;"
+                "你来自：&lt;code&gt;%s&lt;/code&gt;" % escape(first or "（没说）")
+            ))
+
+        # ── 第二关：只认 Host ──
+        if path == "/gate/2":
+            host = self.headers.get("Host", "")
+            if host.split(":")[0].lower() == "admin.internal":
+                return self.reply(200, self.flag_block(2))
+            return self.reply(403, self.deny(
+                "内宅只认 &lt;code&gt;admin.internal&lt;/code&gt; 这块门牌。&lt;br&gt;"
+                "你报的门牌是：&lt;code&gt;%s&lt;/code&gt;" % escape(host or "（没写）")
+            ))
+
+        # ── 第三关：只认 cookie 里的 role ──
+        if path == "/gate/3":
+            role = self.cookies().get("role", "user")
+            if role == "admin":
+                return self.reply(200, self.flag_block(3))
+            return self.reply(200, self.deny(
+                "你的身份是 &lt;code&gt;%s&lt;/code&gt;，这里只有 admin 能进。&lt;br&gt;"
+                "顺便说一句：这个身份是存在 cookie 里的。" % escape(role)
+            ), extra_headers=[("Set-Cookie", "role=%s; Path=/" % escape(role))])
+
+        # ── 第四关：路径直接拼接，没有规范化 ──
+        if path == "/download":
+            name = (query.get("file") or ["notice.txt"])[0]
+            target = os.path.join(PUBLIC, name)          # ← 漏洞就在这一行
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except OSError:
+                return self.reply(404, self.not_found())
+            body = (
+                "&lt;h1&gt;文件内容&lt;/h1&gt;"
+                "&lt;p&gt;你取的是：&lt;code&gt;%s&lt;/code&gt;&lt;/p&gt;"
+                "&lt;pre style=\"white-space:pre-wrap;background:rgba(79,111,82,.07);"
+                "padding:1rem;border-radius:3px\"&gt;%s&lt;/pre&gt;"
+            ) % (escape(name), escape(content))
+            return self.reply(200, body)
+
+        return self.reply(404, self.not_found())
+
+
+def ensure_files():
+    """第一次跑的时候把用到的文件铺好，省得你手建。"""
+    os.makedirs(PUBLIC, exist_ok=True)
+
+    notice = os.path.join(PUBLIC, "notice.txt")
+    if not os.path.exists(notice):
+        with open(notice, "w", encoding="utf-8") as f:
+            f.write("这是一份公开的通知，谁都能下载。\n\n"
+                    "它放在 public/ 目录里，本来只该让这个目录下的文件被读到。\n"
+                    "但你手上那个 file 参数，好像没人管它想去哪儿。\n")
+
+    # 藏在 public 的上一级，正常访问碰不到
+    secret = os.path.join(BASE, "flag.txt")
+    if not os.path.exists(secret):
+        with open(secret, "w", encoding="utf-8") as f:
+            f.write(FLAGS[4] + "\n")
+    # 注意：第四关读到的就是这个文件
+
+
+def main():
+    # Windows 控制台偶尔会因为编码直接崩，先兜一下
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    ensure_files()
+
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    print("")
+    print("  竹隐靶场已开 →  http://%s:%d" % (HOST, PORT))
+    print("  四道门：/gate/1  /gate/2  /gate/3  /download?file=notice.txt")
+    print("  停掉就按 Ctrl+C")
+    print("")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n  收工。")
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
+</code></pre>
+        </div>
+      </details>
 
       <div class="note">
         <span class="note-tag">打完回头看</span>

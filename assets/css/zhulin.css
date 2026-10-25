@@ -813,6 +813,8 @@ a:hover { color: var(--cinnabar); text-decoration-color: rgba(168, 58, 44, .5); 
   overflow: hidden;
 }
 .cmd code { flex: 1; min-width: 0; background: none; border: 0; padding: 0; color: inherit; font-size: inherit; white-space: pre; overflow-x: auto; }
+/* 长地址（GitHub 那种）一行放不下时允许折行，别裁掉后半截 */
+.cmd.wrap code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---------- 评论：茶寮 ---------- */
 .teahouse {

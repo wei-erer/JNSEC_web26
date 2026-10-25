@@ -420,3 +420,32 @@
   box-shadow: none;
   max-height: 22rem;
 }
+
+/* ---------- 完整代码折叠 ---------- */
+.codefold {
+  margin: 1.4rem 0 1.8rem;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
+}
+.codefold > summary {
+  cursor: pointer;
+  padding: .78rem .2rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-family: var(--serif-kai);
+  font-size: .9rem;
+  letter-spacing: .12em;
+  color: var(--bamboo-deep);
+}
+.codefold > summary::-webkit-details-marker { display: none; }
+.codefold > summary::before {
+  content: "▸";
+  color: var(--bamboo-light);
+  font-size: .86em;
+}
+.codefold[open] > summary::before { content: "▾"; }
+.codefold[open] > summary { border-bottom: 1px solid var(--rule-soft); }
+.codefold .labfile { margin: .9rem 0 1.2rem; }
+.codefold pre { max-height: 34rem; overflow-y: auto; }
