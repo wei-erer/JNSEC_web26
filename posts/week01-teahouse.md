@@ -10,10 +10,14 @@
 
 **靶场**
 
-只用 Python 标准库，不用装依赖：
+两百来行，只用 Python 标准库。文件在第一讲第九节的「第零步」里能直接下载，或者点这个：
+
+https://wei-erer.github.io/JNSEC_web26/lab/zhulin_lab.py
+
+存到本地之后，在它所在的文件夹里运行：
 
 ```
-python lab/zhulin_lab.py
+python zhulin_lab.py
 ```
 
 浏览器开 `http://127.0.0.1:8081`。四道门对应四种毛病：XFF、Host、Cookie、路径穿越。打不过就往下看代码 —— 墙是自己砌的，砖在哪儿一清二楚。
