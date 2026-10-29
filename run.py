@@ -15,6 +15,7 @@
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -24,9 +25,34 @@ import webbrowser
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LAB_DIR = os.path.join(ROOT, "lab")
 LAB_FILE = os.path.join(LAB_DIR, "zhulin_lab.py")
+PHP_DIR = os.path.join(LAB_DIR, "php_lab")
 
 WEB_PORT = 8000
 LAB_PORT = 8081
+PHP_PORT = 8082
+
+
+def find_php():
+    """先找 PATH，再找 phpstudy 的常见位置。都没有就返回 None。"""
+    exe = shutil.which("php")
+    if exe:
+        return exe
+
+    roots = [
+        r"D:\phpstudy_pro\Extensions\php",
+        r"C:\phpstudy_pro\Extensions\php",
+        r"D:\phpstudy\php",
+        r"C:\phpstudy\php",
+    ]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root), reverse=True):
+            candidate = os.path.join(root, name, "php.exe")
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
 
 
 def port_open(port):
@@ -87,14 +113,33 @@ def main():
         print("  [靶场]  正在启动 ...")
         procs.append(start([sys.executable, LAB_FILE], LAB_DIR))
 
+    # PHP 靶场（第二讲配套，没有 PHP 就跳过）
+    php = find_php()
+    php_note = ""
+    if php is None:
+        php_note = "没找到 PHP，跳过"
+        print("  [PHP ]  没找到 PHP，第二讲的靶场跳过（装个 phpstudy 或者 wsl 里的 php-cli 都可以）")
+    elif port_open(PHP_PORT):
+        print("  [PHP ]  8082 已经有服务在跑，跳过")
+    else:
+        print("  [PHP ]  正在启动 ...")
+        procs.append(start([php, "-S", "127.0.0.1:%d" % PHP_PORT, "router.php"], PHP_DIR))
+
     time.sleep(1.6)
 
     ok_web = port_open(WEB_PORT)
     ok_lab = port_open(LAB_PORT)
+    ok_php = port_open(PHP_PORT)
 
     print("  " + "-" * 34)
     print("  网站   http://127.0.0.1:%d   %s" % (WEB_PORT, "OK" if ok_web else "启动失败"))
     print("  靶场   http://127.0.0.1:%d   %s" % (LAB_PORT, "OK" if ok_lab else "启动失败"))
+    if ok_php:
+        print("  PHP    http://127.0.0.1:%d   OK" % PHP_PORT)
+    elif php_note:
+        print("  PHP    ———                  %s" % php_note)
+    else:
+        print("  PHP    http://127.0.0.1:%d   启动失败" % PHP_PORT)
     print()
     print("  浏览器会自动打开。要停的时候按 Ctrl+C，")
     print("  或者直接把这个窗口关掉。")

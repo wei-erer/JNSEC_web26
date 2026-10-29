@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其二 · PHP、Python 与 Java | 竹隐</title>
+<meta name="description" content="三种语言在 Web 安全里的分工：Python 写工具，PHP 挖弱类型，Java 啃反序列化的底子。含一个 PHP 靶场和一个 Python 脚本实操。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/css/zhulin.css">
+<link rel="stylesheet" href="../assets/css/tools.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="../index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="../index.html">山门</a>
+    <a href="week01.html">其一 · 工具与 HTTP</a>
+    <a href="week02.html" aria-current="page">其二 · 三种语言</a>
+    <a href="../roadmap.html">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+
+  <article>
+    <div class="juan-title">
+      <span class="plate">其二</span>
+      <h1>PHP、Python 与 Java</h1>
+    </div>
+
+    <p class="juan-deck">
+      这三种语言在 Web 安全里的分工，其实分得很清楚：
+      Python 是你手里的工具，PHP 是你最常打的靶子，Java 是你迟早要啃的那块硬骨头。
+      这一讲不追求把三门语言学完，只把各自跟漏洞最相关的那些部分讲透。
+    </p>
+
+    <div class="juan-meta">
+      <span>第二讲</span>
+      <span class="dot">&middot;</span>
+      <span>三门语言的基础与安全视角</span>
+      <span class="dot">&middot;</span>
+      <span>含 1 个 PHP 靶场、1 个脚本实操</span>
+    </div>
+
+    <div class="prose">
+
+      <h2 id="s-intro" class="nonum" style="margin-top:2.4rem">这一讲在讲什么</h2>
+
+      <p>
+        第一讲把网页、URL、HTTP 讲完了，你现在能看懂一个请求在说什么。
+        但看懂之后呢？你要么得<strong>写点东西去打</strong>，要么得<strong>看懂别人写的代码为什么有洞</strong>。
+        这两件事，分别落在了 Python 和 PHP / Java 上。
+      </p>
+
+      <p>
+        三种语言的分工，讲台上那句话说得挺准：
+      </p>
+
+      <blockquote>
+        <p>Python 是你的工具，PHP 是你的靶子，Java 是你的远方。</p>
+      </blockquote>
+
+      <p>
+        展开说：
+      </p>
+
+      <ul>
+        <li>
+          <strong>Python</strong> —— 你会用一辈子。跑脚本、批量发包、生成 payload、写爬虫、
+          跑自动化，都是它。它不强在"能做什么新事情"，而强在<em>同样的事你能少写十倍代码</em>。
+        </li>
+        <li>
+          <strong>PHP</strong> —— 国内 Web 题的大头。它语法松散、弱类型、历史包袱重，
+          一个 <code>==</code> 就能翻出一堆绕过。它的坑很集中，学一遍能吃很久。
+        </li>
+        <li>
+          <strong>Java</strong> —— 大型比赛里真正的难题几乎都在 Java。
+          反序列化、反射、注解、类加载，这些名字你现在听着像天书，
+          但它们全都建立在"类、对象、接口"这几个概念上。基础不牢，后面一点都看不懂。
+        </li>
+      </ul>
+
+      <p>
+        所以这一讲的顺序是：先装环境 → Python 够用就行 → PHP 重点讲弱类型和危险函数 →
+        Java 把 OOP 和反射那套地基打上。能记住多少算多少，剩下的等用到了再回来翻。
+      </p>
+
+
+      <h2 id="s-env">先把环境装上</h2>
+
+      <p>
+        这一讲要动手的东西多了，工具也得多配几样。但别一次全装完 ——
+        先装你眼下要用的，剩下的用到再说。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:8rem">工具</th><th style="width:7rem">干什么</th><th>什么时候用得到</th></tr></thead>
+        <tbody>
+          <tr><td>PyCharm / VS Code</td><td>写 Python</td><td>这一节就要用。PyCharm 社区版免费，嫌重就用 VS Code + Python 插件</td></tr>
+          <tr><td>PhpStorm</td><td>写 PHP</td><td>看 PHP 代码、自己搭靶场。有断点调试，比记事本强太多</td></tr>
+          <tr><td>IntelliJ IDEA</td><td>写 Java</td><td>Java 必配，别的编辑器补全跟不上</td></tr>
+          <tr><td>JDK 8u65</td><td>Java 运行环境</td><td><strong>做 Java 安全必备</strong>，见下面那条说明</td></tr>
+          <tr><td>Maven</td><td>Java 依赖管理</td><td>跑别人的 Java 项目、拉依赖</td></tr>
+          <tr><td>PHP 环境</td><td>跑 PHP</td><td>phpstudy 或 WSL 里 <code>apt install php-cli</code>，至少有一个</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note secret">
+        <span class="note-tag">JDK 版本为什么非要 8u65</span>
+        <p>
+          做 Java 反序列化的时候，很多 gadget 链是<strong>依赖具体 JDK 版本</strong>的，
+          换了版本就跑不通。8u65 是圈子里公认的经典版本，网上大量现成的链子都以它为基准。
+        </p>
+        <p>
+          官网现在只给 8u65 的 32 位安装包，32 位在某些链子的构造上会出问题，
+          所以要用 64 位的包。这事属于"前人踩过的坑"，记住结论就行。
+        </p>
+        <p>
+          另外，JDK 17 / 21 也可以顺手装一个 —— 那是目前企业里在用的版本，
+          以后真拿 Java 做项目会用上。
+        </p>
+      </div>
+
+      <div class="note pit">
+        <span class="note-tag">关于 JetBrains 全家桶</span>
+        <p>
+          学生可以用教育邮箱申请正版授权，一年一续，完全免费。
+          在 <a href="https://www.jetbrains.com/community/education/" target="_blank" rel="noopener">jetbrains.com/community/education</a>
+          用学校邮箱注册就行 —— 比到处找激活脚本省心，也不担心哪天失效。
+        </p>
+      </div>
+
+      <h3>PHP 环境：两个法子</h3>
+
+      <p>
+        PHP 代码得有个解释器才能跑。两种做法：
+      </p>
+
+      <ol class="step">
+        <li>
+          <strong>phpstudy</strong>（第一讲装过的话就现成了）。把 <code>.php</code> 文件丢进
+          <code>www</code> 目录，浏览器访问 <code>127.0.0.1</code>。
+        </li>
+        <li>
+          <strong>WSL 里的 php</strong>。命令行一条：
+          <div class="cmd"><code>sudo apt install -y php-cli</code></div>
+          之后用 <code>php -S 127.0.0.1:8082</code> 就能在任意目录起一个 PHP 服务器。
+          这一讲的靶场就是这么跑的。
+        </li>
+      </ol>
+
+      <p>
+        两个都行，挑你顺手的。后面的实操两个方式都能做。
+      </p>
+
+
+      <h2 id="s-python">Python：写脚本的那只手</h2>
+
+      <p>
+        你以后写的每一个批量发包、每一个 payload 生成器、每一个把结果整理成表格的小工具，
+        大概率都是 Python。
+      </p>
+
+      <h3>和 C 比，它到底省在哪儿</h3>
+
+      <p>
+        C 语言干任何事之前，先要 <code>#include</code> 一堆头文件，自己管内存，自己写循环遍历。
+        Python 是"开箱就有一堆现成的轮子"：别人写好的库，一行 <code>import</code> 就能用。
+      </p>
+
+      <p>
+        C 里几十上百行的事，在 Python 里可能就是一个函数调用。
+        这就是它适合写脚本的全部理由 —— <strong>不是能力更强，是同样的活更快干完</strong>。
+      </p>
+
+      <h3>变量、if、循环：看看差别</h3>
+
+      <p>变量不用声明类型，直接赋值就是定义：</p>
+
+      <pre><code># C 里要写
+int c = 1;
+
+# Python 里
+c = 1</code></pre>
+
+      <p>判断用缩进代替大括号，条件后面跟冒号：</p>
+
+      <pre><code>if a &gt; b:
+    print("a 大")
+else:
+    print("b 大")</code></pre>
+
+      <p>循环：</p>
+
+      <pre><code>for i in range(10):     # 循环十次，i 从 0 到 9
+    print(i)
+
+while i &gt; 10:           # 和 C 一样
+    i -= 1</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">缩进就是语法</span>
+        <p>
+          Python 用<b>缩进</b>划分代码块，不是大括号。<strong>混用空格和 Tab 是新手第一大坑</strong>，
+          报 <code>IndentationError</code> 的时候先看这个。
+        </p>
+        <p>编辑器里把 Tab 设成 4 个空格，养成习惯。</p>
+      </div>
+
+      <h3>六种数据类型</h3>
+
+      <p>Python3 有六种标准类型，先记住长什么样，不用背方法：</p>
+
+      <table>
+        <thead><tr><th style="width:7rem">类型</th><th style="width:8rem">写法</th><th>干什么用</th></tr></thead>
+        <tbody>
+          <tr><td>Number 数字</td><td><code>n = 1</code></td><td>整数、浮点、复数</td></tr>
+          <tr><td>String 字符串</td><td><code>s = "aaa"</code></td><td>文本。Web 里到处都是它</td></tr>
+          <tr><td>List 列表</td><td><code>l = ["a", "b"]</code></td><td>有序、可变。最常用</td></tr>
+          <tr><td>Tuple 元组</td><td><code>t = (1, 2)</code></td><td>有序、不可变</td></tr>
+          <tr><td>Set 集合</td><td><code>s = set()</code></td><td>无序、自动去重</td></tr>
+          <tr><td>Dictionary 字典</td><td><code>d = {}</code></td><td>键值对。发请求传参数基本都用它</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        注意 Python 是<strong>动态类型</strong>的：同一个名字可以先存数字，后存字符串，
+        再存列表，它都不拦你。方便，也容易埋 bug —— 跑起来才发现类型不对。
+      </p>
+
+      <h3>模块、包、库：三个词一个意思</h3>
+
+      <ul>
+        <li><strong>模块（module）</strong> —— 一个 <code>.py</code> 文件就是一个模块</li>
+        <li><strong>包（package）</strong> —— 一堆模块放进一个文件夹，就是包</li>
+        <li><strong>库（library）</strong> —— 平时口头说的"库"，可能是模块也可能是包，不用较真</li>
+      </ul>
+
+      <p>用 <code>import</code> 引进来：</p>
+
+      <pre><code>import os                    # 整个模块进来
+from os import path          # 只拿里面的一个</code></pre>
+
+      <h3>requests：三行写个爬虫</h3>
+
+      <p>先装：</p>
+
+      <div class="cmd"><code>pip install requests</code></div>
+
+      <p>
+        国内装得慢的话，加个镜像源：
+      </p>
+
+      <div class="cmd"><code>pip install requests -i https://pypi.tuna.tsinghua.edu.cn/simple</code></div>
+
+      <p>然后，三行：</p>
+
+      <pre><code>import requests
+res = requests.get("https://www.baidu.com")
+print(res.text)</code></pre>
+
+      <p>逐行看：</p>
+
+      <ol>
+        <li><code>import requests</code> —— 把模块拿进来</li>
+        <li>
+          <code>requests.get(url)</code> —— 模块里有个 <code>get()</code> 方法，
+          它<strong>模拟浏览器发一个 GET 请求</strong>，返回一个装着响应信息的对象
+        </li>
+        <li><code>res.text</code> —— 把响应体当文本打印出来</li>
+      </ol>
+
+      <p>
+        就这样，你已经写了一个爬虫。所谓"爬虫"，就是<strong>用程序按规则自动抓取网页内容</strong>，
+        本质和你用浏览器打开页面没区别，只是换成了代码在点。
+      </p>
+
+      <h3>做题目最常用的四个参数</h3>
+
+      <p>
+        直接抄作业吧，这四段基本覆盖了八成的题：
+      </p>
+
+      <pre><code>import requests
+
+URL = "http://www.example.com"
+
+# ① GET 参数 —— 拼在 URL 后面
+params_ = {"name": "solo", "age": 19}
+r = requests.get(URL, params=params_)
+# 等价于请求 http://www.example.com?name=solo&amp;age=19
+
+# ② 自定义请求头 —— 改 Host、改 UA 都靠它
+headers_ = {"User-Agent": "solo/1.0.0", "Host": "127.0.0.2:7777"}
+r = requests.get(URL, headers=headers_)
+# 注意：请求头里有 Host 时，requests 会优先用它，而不是 URL 里的主机
+#       —— 这正好是第一讲那个 Host 头漏洞的利用方式
+
+# ③ 带 cookie —— 相当于"我已经登录了"
+cookies_ = {"token": "access_token"}
+r = requests.get(URL, cookies=cookies_)
+
+# ④ 超时 —— 别让脚本卡死在一个请求上
+r = requests.get(URL, timeout=2)</code></pre>
+
+      <p>POST 也差不多，区别只是参数放哪儿：</p>
+
+      <pre><code>data = {"name": "solo", "age": 19}
+
+requests.post(url, data=data)    # 表单格式，Content-Type: application/x-www-form-urlencoded
+requests.post(url, json=data)    # JSON 格式，Content-Type: application/json</code></pre>
+
+      <p>
+        这两个的区别，就是第一讲里 <code>Content-Type</code> 那一节说的：
+        后端按格式选解析器，选错了可能绕过某处校验。
+      </p>
+
+      <h3>挂在 Burp 上跑</h3>
+
+      <p>
+        写脚本的时候想让 Burp 看到你发的包？加个 <code>proxies</code> 参数：
+      </p>
+
+      <pre><code>proxies = {
+    "http":  "http://127.0.0.1:8080",
+    "https": "http://127.0.0.1:8080",
+}
+res = requests.get("http://127.0.0.1:8081/", proxies=proxies)</code></pre>
+
+      <p>
+        这样脚本发的请求也会经过 Burp，你能在 HTTP history 里看到它、能改成 Repeater 去改。
+        <strong>调试脚本的时候这个特别有用</strong> —— 脚本发出去的包到底长什么样，看 Burp 最清楚。
+      </p>
+
+      <h3>os 和 zipfile：CTF 里的日常</h3>
+
+      <p>
+        Web 题不一定都是 Web，经常要处理压缩包、批量改文件、扫目录。
+        这些一两个库就够：
+      </p>
+
+      <pre><code>import os, zipfile
+
+# 目录与文件
+os.makedirs("./test_dir", exist_ok=True)   # 建目录，已存在不报错
+print(os.listdir("./"))                     # 列出当前目录，返回列表
+os.remove("a.txt")                          # 删文件
+os.rename("1.py", "1_new.py")               # 改名
+
+# 读写文件（with 会自动关文件，别用 open/close 手动管）
+with open("a.txt", "w", encoding="utf-8") as f:
+    f.write("Hello")
+
+# 压缩包
+with zipfile.ZipFile("out.zip", "w") as z:
+    for name in os.listdir("./"):
+        if name.endswith(".png"):
+            z.write(os.path.join("./", name))
+
+with zipfile.ZipFile("out.zip", "r") as z:
+    z.extractall("./unzip_dir")
+
+# 带密码的压缩包也支持（爆破时就是这个用法）
+with zipfile.ZipFile("protected.zip", "r") as z:
+    z.extractall("./out", pwd=b"123456")</code></pre>
+
+      <div class="note">
+        <span class="note-tag">为什么这些跟安全有关</span>
+        <p>
+          因为真实比赛里，你拿到的往往是一个压缩包、一堆文件、一个要跑几百次的脚本。
+          <strong>手工能做的只有验证，批量的事必须交给代码。</strong>
+          这就是 Python 在这里的位置 —— 它不是攻击面，它是你的手。
+        </p>
+      </div>
+
+      <h3>异步和多线程：为什么爆破快不起来</h3>
+
+      <p>
+        先说结论：<strong>同步写发的请求是一个一个等着回来的</strong>。发一个、等服务端回、
+        再发下一个。一个请求 0.2 秒，跑一万条字典要半小时。
+      </p>
+
+      <p>
+        你想的可能是"开多线程"。但脚本跑得多了会发现，纯多线程在这种场景下不一定好：
+        线程开销大、不好控制并发数、出错难查。
+      </p>
+
+      <p>
+        更现代的做法是<strong>异步 I/O</strong>：一个线程里同时挂着几百个请求，
+        谁先回来先处理谁，不用为每个请求开一个线程。
+      </p>
+
+      <p>Python 里这套东西叫 <code>asyncio</code>，三个概念：</p>
+
+      <ul>
+        <li>
+          <strong>协程（coroutine）</strong> —— 用 <code>async def</code> 定义的函数。
+          它和普通函数的区别是：<strong>可以跑到一半停下来</strong>，把控制权交出去，
+          等条件满足了再从停下的地方接着跑。停下的位置就是 <code>await</code> 那一行。
+        </li>
+        <li>
+          <strong>事件循环（event loop）</strong> —— 那个"调度员"。它不停地看：谁好了？谁在等？
+          好了就推进，在等的就放着。
+        </li>
+        <li>
+          <strong>任务（Task）</strong> —— 把协程登记进去，让它从"一张工单"变成"正在推进的活"。
+        </li>
+      </ul>
+
+      <pre><code>import asyncio
+
+async def work(n):              # 协程：可以中途让出
+    print("开始", n)
+    await asyncio.sleep(1)      # 在这里暂停，交还控制权
+    print("完成", n)
+
+async def main():
+    task = asyncio.create_task(work(1))   # 登记成任务
+    await task                            # 等它
+
+asyncio.run(main())             # 事件循环从这里启动</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">最容易懵的一点</span>
+        <p>
+          直接调用协程函数 <code>work(1)</code>，<strong>它不会执行</strong>，
+          只会返回一个协程对象。必须交给 <code>asyncio.run()</code> 或者
+          <code>create_task()</code> 才会跑起来。
+        </p>
+        <p>这和普通函数"调用就执行"的直觉相反，第一次见都会愣一下。</p>
+      </div>
+
+      <p>
+        至于真正批量发包，最省事的写法是 <code>aiohttp</code> 或者
+        <code>asyncio</code> + 线程池。到你真要爆破的时候再深入，现在知道
+        "同步会慢、异步能快"这件事就够了。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">顺带一提：多进程 / 多线程 / 协程怎么选</span>
+        <ul>
+          <li><strong>I/O 密集</strong>（发请求、读写文件、查数据库）→ 协程或线程池。这是你们绝大多数场景。</li>
+          <li><strong>CPU 密集</strong>（算哈希、解密）→ 多进程。Python 有 GIL，多线程在这里没用。</li>
+          <li><strong>线程池</strong> —— <code>concurrent.futures.ThreadPoolExecutor</code>，标准库自带，写起来比裸线程简单，跑 I/O 任务够用。</li>
+        </ul>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>用 Python 打一遍第一讲的靶场</h3>
+        </div>
+        <p>
+          把第一讲那个靶场跑起来（<code>python zhulin_lab.py</code>），
+          然后新建一个 <code>try.py</code>，把下面这段抄进去跑：
+        </p>
+        <pre><code>import requests
+
+base = "http://127.0.0.1:8081"
+
+# 第一关：加个 X-Forwarded-For 头
+r = requests.get(base + "/gate/1", headers={"X-Forwarded-For": "127.0.0.1"})
+print("第一关:", r.text[:60])
+
+# 第二关：改 Host
+r = requests.get(base + "/gate/2", headers={"Host": "admin.internal"})
+print("第二关:", r.text[:60])
+
+# 第三关：带 cookie
+r = requests.get(base + "/gate/3", cookies={"role": "admin"})
+print("第三关:", r.text[:60])
+
+# 第四关：路径穿越
+r = requests.get(base + "/download", params={"file": "../flag.txt"})
+print("第四关:", r.text[:60])</code></pre>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          四段 flag 全出来，你就有了一件比 Burp 快得多的武器 ——
+          而且它是可复制的，改个地址就能打下一台。
+        </p>
+      </div>
+
+      <h2 id="s-php">PHP：为什么 Web 安全绕不开它</h2>
+
+      <p>
+        PHP 是"服务器端脚本语言"，跟第 Python 一样，代码在服务器上执行，用户只拿到结果。
+        它语法松、上手快、当年建站成本极低，所以国内早期的网站、CMS、论坛，
+        十有八九是 PHP 写的。
+      </p>
+
+      <p>
+        这些站后来大量还在跑，代码里塞满了老式写法 —— 这既是 Web 题的主要来源，
+        也是"一个 <code>==</code> 能翻出一堆绕过"的原因。
+      </p>
+
+      <h3>代码标记：一段 HTML 里怎么插 PHP</h3>
+
+      <pre><code>&lt;?php echo "标准写法"; ?&gt;      ← 最常用
+
+&lt;?= $a ?&gt;                      ← 短输出，等价于 &lt;?php echo $a; ?&gt;
+
+&lt;? echo "短标记"; ?&gt;            ← 需要 php.ini 里 short_open_tag=On
+
+&lt;script language="php"&gt; ... &lt;/script&gt;   ← 古老写法，早就不支持了</code></pre>
+
+      <div class="note secret">
+        <span class="note-tag">这个跟绕过有什么关系</span>
+        <p>
+          有的站会把用户输入里的 <code>&lt;?php</code> 过滤掉。但如果你能控制写入文件的内容，
+          用 <code>&lt;?=</code> 短标签就能绕开这个过滤 —— 它同样是可执行的 PHP 代码。
+          这类"同一件事有多种写法"的差异，在文件上传、命令执行、模板注入里到处都有。
+        </p>
+      </div>
+
+      <h3>语句、注释、变量</h3>
+
+      <pre><code>&lt;?php
+// 单行注释
+#  也是单行注释
+/* 多行注释 */
+
+$a = 1;          // 变量必须以 $ 开头，不需要声明类型
+$name = "solo";
+echo $a;         // 输出
+unset($a);       // 删除变量
+?&gt;</code></pre>
+
+      <p>三个细节：</p>
+      <ul>
+        <li>每条语句以 <code>;</code> 结尾。但 <code>?&gt;</code> 自带结束效果，最后一行可以不带分号。</li>
+        <li>变量名区分大小写，函数名不区分。</li>
+        <li>命名规则和 C 一样：字母或下划线开头，后面可以跟数字。</li>
+      </ul>
+
+      <h3>预定义变量：题目的入口都在这儿</h3>
+
+      <p>
+        这九个全局数组，是 PHP 接收外部数据的窗口。你在做题时看到的每一个 <code>$_GET['a']</code>，
+        都是一个用户能控制的值。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:9rem">变量</th><th>装的是什么</th><th style="width:8rem">攻击面</th></tr></thead>
+        <tbody>
+          <tr><td><code>$_GET</code></td><td>URL 上的查询参数</td><td><strong>最高频</strong></td></tr>
+          <tr><td><code>$_POST</code></td><td>请求体里的表单数据</td><td>高频</td></tr>
+          <tr><td><code>$_REQUEST</code></td><td>GET + POST + COOKIE 三合一</td><td>容易误取</td></tr>
+          <tr><td><code>$_COOKIE</code></td><td>浏览器带来的 cookie</td><td>可伪造</td></tr>
+          <tr><td><code>$_FILES</code></td><td>上传的文件信息</td><td>文件上传题</td></tr>
+          <tr><td><code>$_SERVER</code></td><td>服务器与请求信息（含 Host、UA、IP）</td><td>可伪造</td></tr>
+          <tr><td><code>$_SESSION</code></td><td>服务端会话</td><td>取决于逻辑</td></tr>
+          <tr><td><code>$_ENV</code></td><td>环境变量</td><td>配置泄露</td></tr>
+          <tr><td><code>$GLOBALS</code></td><td>所有全局变量</td><td>变量覆盖</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        记住一句话：<strong>这九个数组里的东西，全部来自客户端，全部可以伪造</strong>。
+        后端只要拿它们当"可信数据"用，就出问题。
+      </p>
+
+      <h3>可变变量：$$ 这个东西</h3>
+
+      <p>
+        如果一个变量的<em>值</em>正好是另一个变量的<em>名字</em>，可以用两个 <code>$</code> 去取它：
+      </p>
+
+      <pre><code>&lt;?php
+$a = 'b';      // $a 里存的是字符串 "b"
+$b = 2;        // $b 的值是 2
+
+echo $$a;      // 等价于 echo $b;  →  输出 2
+?&gt;</code></pre>
+
+      <p>
+        看着像个语言特性，实际上它是<strong>变量覆盖漏洞</strong>的底层机制之一。
+        想象 <code>$a</code> 是你从 <code>$_GET</code> 拿到的值，而代码后面又用 <code>$$a</code>
+        做了操作 —— 你传什么名字，它就操作哪个变量。
+      </p>
+
+      <h3>值传递和引用传递</h3>
+
+      <pre><code>&lt;?php
+$a = 1;
+$b = $a;      // 值传递：各存各的，改谁不影响谁
+$b = 2;
+echo $a;      // 还是 1
+
+$c = 1;
+$d = &amp;$c;     // 引用：加个 &amp;，两个名字指向同一块内存
+$d = 2;
+echo $c;      // 变成 2 了
+?&gt;</code></pre>
+
+      <p>
+        <code>&amp;</code> 是 PHP 的引用符号。它跟 C 的指针不是一回事，
+        但"改一个另一个也变"的效果是一样的。
+      </p>
+
+      <h3>作用域：函数里拿不到外面的变量</h3>
+
+      <p>
+        这一点和很多语言都不一样，初学者极容易懵：
+      </p>
+
+      <pre><code>&lt;?php
+$x = 5;           // 全局
+
+function test() {
+    echo $x;      // 拿不到！这里是空的，会报 undefined
+}
+test();
+
+function test2() {
+    global $x;    // 必须用 global 声明
+    echo $x;      // 现在能拿到了
+}
+?&gt;</code></pre>
+
+      <p>
+        PHP 的函数作用域是封闭的。要在函数里用全局变量，得写 <code>global $x;</code>，
+        或者用 <code>$GLOBALS['x']</code> —— 后者是超全局数组，在哪都能访问。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">这个坑在审代码时很要命</span>
+        <p>
+          你看到函数里用了 <code>$flag</code>，以为它是全局那个 flag，其实不是 ——
+          函数里那个是新的空变量。<strong>很多"明明赋值了却没生效"的逻辑漏洞就是这么来的</strong>。
+        </p>
+      </div>
+
+      <h3>常量</h3>
+
+      <pre><code>&lt;?php
+define("GREETING", "Welcome to JNWA!");
+echo GREETING;          // 常量名前不加 $，也用不了 $
+?&gt;</code></pre>
+
+      <p>常量定义后不能改，整个脚本里都能用。名字默认区分大小写。</p>
+
+      <h3>数据类型</h3>
+
+      <p>
+        String、Integer、Float、Boolean、Array、Object、NULL。
+        表面上和别的语言差不多，但 PHP 是<strong>弱类型</strong>的 ——
+        这是下一节的全部素材。
+      </p>
+
+
+      <h2 id="s-phpweak">PHP 弱类型：一个 == 能翻出多少事</h2>
+
+      <p>
+        这一节是 PHP 部分最值钱的地方。国内 Web 题里，"绕过一个比较"的套路，
+        八成都能在下面找到原型。
+      </p>
+
+      <h3>== 和 === 的区别</h3>
+
+      <ul>
+        <li><strong><code>==</code></strong> 松散比较：<strong>只比值，不类型</strong>。类型不同它会先转换再比。</li>
+        <li><strong><code>===</code></strong> 严格比较：<strong>值和类型都得一样</strong>。</li>
+      </ul>
+
+      <pre><code>&lt;?php
+var_dump(42 == "42");     // true   42 和字符串 "42" 转成同一类型后相等
+var_dump(42 === "42");    // false  一个是整型一个是字符串
+?&gt;</code></pre>
+
+      <p>看着正常。问题在于 PHP 转换的规则很野：</p>
+
+      <pre><code>&lt;?php
+var_dump(12 == "12");      // true   显然
+var_dump(12 == "12aa");    // true   字符串开头有数字，就取开头那段
+var_dump("admin" == 0);    // true   转不成数字的字符串，变成 0
+var_dump(0 == NULL);       // true
+var_dump(true == "随便什么"); // true  布尔 true 和任意非空字符串弱相等
+?&gt;</code></pre>
+
+      <div class="note secret">
+        <span class="note-tag">这就是经典的"魔术哈希"</span>
+        <p>
+          第三条 <code>"admin" == 0</code> 为真的原因是：比较数字和字符串时，
+          字符串如果转不成数字就变成 <code>0</code>，于是 <code>0 == 0</code>。
+        </p>
+        <p>
+          所以那种"密码不能等于 admin"的代码，
+          <code>if ($_GET['pwd'] == 'admin') die();</code> 后面如果还比 <code>== 0</code>，
+          就有得玩了。
+        </p>
+      </div>
+
+      <h3>0e 魔术：md5 弱比较的看家本领</h3>
+
+      <p>
+        <code>0e</code> 开头、后面全是数字的字符串，在弱比较里会被当成<strong>科学计数法</strong>：
+        <code>0e123</code> 就是 0 乘以 10 的 123 次方，结果还是 0。所以：
+      </p>
+
+      <pre><code>"0e830400451993494058024219903391" == "0e462097431906509019562988736854"
+// 两边都是 0 × 10^xxx = 0，判等成立</code></pre>
+
+      <p>而正好有一批字符串，它们的 MD5 值就是这种形状：</p>
+
+      <table>
+        <thead><tr><th style="width:11rem">原字符串</th><th>它的 md5</th></tr></thead>
+        <tbody>
+          <tr><td><code>QNKCDZO</code></td><td><code>0e830400451993494058024219903391</code></td></tr>
+          <tr><td><code>240610708</code></td><td><code>0e462097431906509019562988736854</code></td></tr>
+          <tr><td><code>s878926199a</code></td><td><code>0e545993274517709034328855841020</code></td></tr>
+          <tr><td><code>s155964671a</code></td><td><code>0e342768416822451524974117254469</code></td></tr>
+          <tr><td><code>s214587387a</code></td><td><code>0e848240448830537924465865611904</code></td></tr>
+        </tbody>
+      </table>
+
+      <p>所以这种题目：</p>
+
+      <pre><code>&lt;?php
+include "flag.php";
+highlight_file(__FILE__);
+if (isset($_GET['a']) &amp;&amp; isset($_GET['b'])) {
+    $a = $_GET['a'];
+    $b = $_GET['b'];
+    if (($a !== $b) &amp;&amp; (md5($a) == md5($b))) {   // 注意这里是 ==
+        echo $flag;
+    }
+}
+?&gt;</code></pre>
+
+      <p>
+        两个值必须不一样（<code>!==</code>），但 md5 之后要弱相等。
+        直接传 <code>?a=QNKCDZO&amp;b=240610708</code> 就过了。
+      </p>
+
+      <h3>数组绕过：当 md5 收到一个数组</h3>
+
+      <p>
+        如果题目把 <code>==</code> 换成了 <code>===</code> 呢？0e 就不管用了。
+        但还有一条路：
+      </p>
+
+      <pre><code>?a[]=1&amp;b[]=2</code></pre>
+
+      <p>
+        这样 <code>$_GET['a']</code> 拿到的是一个数组。而 <code>md5()</code> 只接受字符串，
+        传数组进去会<strong>报错并返回 NULL</strong>。于是：
+      </p>
+
+      <pre><code>md5($a) === md5($b)   →   NULL === NULL   →   true</code></pre>
+
+      <p>
+        严格比较反而被绕过了。<strong>这个套路几乎所有"传参给函数比较"的地方都适用</strong> ——
+        只要那个函数对数组会返回 null 或者报错。
+      </p>
+
+      <h3>还有一个：科学计数法绕长度</h3>
+
+      <pre><code>&lt;?php
+$a = $_GET['a'];
+if (strlen($a) &lt; 4) {
+    if (($a + 1) &gt; 1000) {
+        echo "success";
+    }
+}
+?&gt;</code></pre>
+
+      <p>
+        长度小于 4，加 1 之后要大于 1000。正常数字做不到（999+1=1000 不满足大于）。
+        但传 <code>?a=1e3</code>：长度 3，<code>1e3 + 1 = 1001</code>，过了。
+      </p>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>打一遍 PHP 弱类型靶场</h3>
+        </div>
+        <p>
+          我们在仓库里放了一组 PHP 小关，四个文件，跑起来就能打：
+        </p>
+        <ol class="step">
+          <li>
+            确认本机有 PHP：
+            <div class="cmd"><code>php -v</code></div>
+            没有的话，WSL 里 <code>sudo apt install -y php-cli</code>，
+            或者用 phpstudy 的。
+          </li>
+          <li>
+            进到靶场目录再起：
+            <div class="cmd"><code>php -S 127.0.0.1:8082</code></div>
+            在 <code>lab/php_lab/</code> 目录下执行这条命令。
+          </li>
+          <li>浏览器打开 <code>http://127.0.0.1:8082/</code>，四关摆在那儿。</li>
+        </ol>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          每一关都能在下面几节里找到对应知识：弱比较、0e、数组、变量覆盖。
+          打不过就右键看源码（<code>view-source:</code>），或者直接翻 <code>lab/php_lab/</code> 里的文件。
+        </p>
+      </div>
+
+
+      <h2 id="s-phpfunc">PHP 危险函数：每一行都可能是个洞</h2>
+
+      <p>
+        PHP 内置上千个函数，其中有一批是 Web 题的常客。这一节挑六个讲，
+        每一个都能单独出一类题。
+      </p>
+
+      <h3>include：把一个文件塞进来</h3>
+
+      <pre><code>&lt;?php
+// 1.php
+include "flag.php";       // 把 flag.php 的内容插到这儿执行
+if ($_GET['a'] == $_GET['b']) {
+    echo $flag;           // $flag 来自被 include 的文件
+}
+?&gt;</code></pre>
+
+      <p>
+        <code>include</code> 会在执行时把指定文件的内容读进来、当作 PHP 代码执行。
+        这里的两个问题，是后面文件包含题的原型：
+      </p>
+      <ul>
+        <li>如果 <code>include</code> 的路径来自用户输入 → <strong>本地/远程文件包含（LFI / RFI）</strong></li>
+        <li>被 include 的文件里定义的变量，会在当前作用域里生效 → <strong>变量注入</strong></li>
+      </ul>
+
+      <p>同族的还有 <code>require</code>、<code>include_once</code>、<code>require_once</code>，区别只在"找不到文件时的行为"和"是否重复包含"。</p>
+
+      <h3>system：直接执行系统命令</h3>
+
+      <pre><code>&lt;?php
+system("dir D:");        // Windows 下列目录
+system("whoami");        // Linux 下看当前用户
+?&gt;</code></pre>
+
+      <p>
+        这就是<strong>命令执行</strong>。一旦参数来自用户输入，服务器就是你的了。
+      </p>
+
+      <p>
+        同一家族还有几个，都得认识：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:9rem">函数</th><th>区别</th></tr></thead>
+        <tbody>
+          <tr><td><code>system()</code></td><td>执行并<strong>直接输出</strong>结果</td></tr>
+          <tr><td><code>exec()</code></td><td>执行，输出<strong>最后一行</strong>，结果可以存进数组</td></tr>
+          <tr><td><code>shell_exec()</code></td><td>执行，<strong>返回全部输出</strong>作为字符串</td></tr>
+          <tr><td><code>passthru()</code></td><td>执行并<strong>原样输出二进制</strong>数据</td></tr>
+          <tr><td>反引号 <code>`cmd`</code></td><td>等价于 <code>shell_exec()</code>，最容易被忽略</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note secret">
+        <span class="note-tag">反引号那个坑，很多题就靠它</span>
+        <p>
+          有人装了 <code>disable_functions</code>，把 <code>system</code>、<code>exec</code>、
+          <code>shell_exec</code> 全禁了，却忘了反引号走的也是 <code>shell_exec</code>。
+          于是 <code>echo `whoami`;</code> 照样能执行。
+        </p>
+        <p>这类"禁了 A 忘了 B"的清单式防护，永远有漏网的。</p>
+      </div>
+
+      <h3>eval：把字符串当代码跑</h3>
+
+      <pre><code>&lt;?php
+eval('echo "hello";');     // 字符串里的内容会被当作 PHP 代码执行
+?&gt;</code></pre>
+
+      <p>
+        <code>eval</code> 比命令执行更危险 —— 它执行的是 <strong>PHP 代码</strong>，
+        不是系统命令。区别在于：
+      </p>
+      <ul>
+        <li><strong>代码执行</strong> —— 跑的是 PHP，能读变量、能调函数、能 include</li>
+        <li><strong>命令执行</strong> —— 跑的是系统命令，受限于当前用户的权限</li>
+      </ul>
+      <p>
+        从代码执行到命令执行，通常只要再 <code>system()</code> 一下。
+      </p>
+
+      <h3>extract：变量覆盖的老祖宗</h3>
+
+      <pre><code>&lt;?php
+$a = "Original";
+$arr = array("a" =&gt; "Cat", "b" =&gt; "Dog");
+extract($arr);
+echo $a;      // 输出 Cat —— 原来的值被覆盖了
+?&gt;</code></pre>
+
+      <p>
+        <code>extract()</code> 把数组里的键值对，变成当前作用域的变量。
+        如果这个数组是 <code>$_GET</code>，那就是<strong>用户能覆盖任意变量</strong>：
+      </p>
+
+      <pre><code>&lt;?php
+highlight_file(__FILE__);
+include "flag.php";
+extract($_GET);                    // ← 危险在这里
+
+foreach ($_GET as $var) {
+    if (preg_match("/[a-zA-Z0-9]/", $var)) {   // 只是检查了值，没检查键
+        die("error");
+    }
+}
+if ($cmd) {
+    echo $flag;
+}
+?&gt;</code></pre>
+
+      <p>
+        检查的是<em>值</em>里不能有字母数字，但变量名（键）没管。
+        所以传 <code>?cmd=1</code> 就能让 <code>if ($cmd)</code> 成立。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">同族的还有几个</span>
+        <p>
+          <code>parse_str()</code>、<code>import_request_variables()</code>（老版本）、
+          以及 <code>$$key = $value</code> 这种手写循环，效果都差不多：把用户输入变成变量。
+        </p>
+        <p>
+          <code>register_globals</code> 那个上古开关早就默认关了，但手写的"变量覆盖"至今还在。
+        </p>
+      </div>
+
+      <h3>md5：不可逆，但可以被绕过</h3>
+
+      <p>
+        <code>md5()</code> 把任意长度输入压成 32 位十六进制，是单向的，解不回去。
+        但在 PHP 题里，出问题的从来不是"解密"，而是<strong>拿它去比较</strong>。
+      </p>
+
+      <p>三种常见玩法，上一节已经讲过两种：</p>
+      <ul>
+        <li><strong>0e 绕过</strong> —— 弱比较时两个 <code>0e...</code> 都当 0</li>
+        <li><strong>数组绕过</strong> —— 传数组进去返回 null，<code>null === null</code></li>
+        <li><strong>真碰撞</strong> —— 找到两个不同字符串 md5 完全相同（这对连字符都要求一样，网上有现成的一对）</li>
+      </ul>
+
+      <p>
+        最后那种，题面通常要求 <code>md5($a) === md5($b)</code> 且 <code>$a !== $b</code>，
+        而且限制了必须是字符串。那就只能拿现成的碰撞对了。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">这一节说完，你应该有个感觉</span>
+        <p>
+          PHP 的坑不是"语法没学懂"，而是<strong>每个函数的边界条件，都可能被人利用</strong>。
+          弱类型的转换规则、函数对异常输入的行为（返回 null？报错？截断？）、
+          变量作用域的怪癖——这些"边角料"，才是出题人待的地方。
+        </p>
+      </div>
+
+      <h2 id="s-java">Java：为什么安全的人躲不掉</h2>
+
+      <p>
+        如果你只打算做点小型 CTF Web 题，Java 可以先放一放。
+        但只要往深了走 —— 大厂面试、大型比赛、真实的业务系统 —— Java 这道坎绕不过去。
+        原因很实在：<strong>企业里跑的 Web 系统，大头是 Java 写的。</strong>
+      </p>
+
+      <p>
+        而 Java 安全里最难的那块（反序列化、RMI、JNDI），
+        全都建立在这一节要讲的东西上：类、对象、接口、注解、反射。
+        基础不牢，那些题你看一眼就会觉得"每一个字都认识，连起来不是人话"。
+      </p>
+
+      <h3>它怎么运行：先编译，再解释</h3>
+
+      <pre><code>源代码 .java  --(javac 编译)--&gt;  字节码 .class  --(JVM 执行)--&gt;  运行结果</code></pre>
+
+      <p>
+        这是 Java 的"一次编写，到处运行"：编译出来的不是机器码，是<strong>字节码</strong>，
+        由各个平台上的 JVM 负责执行。所以同一个 <code>.class</code> 在 Windows、Linux、macOS 上都能跑。
+      </p>
+
+      <p>
+        最早的 Java 是纯解释执行，后来加了 <strong>JIT 即时编译</strong>（把热点代码编译成本地机器码），
+        所以现在它算是一种"混合型"语言。
+      </p>
+
+      <h3>第一个程序</h3>
+
+      <pre><code>public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello World");
+    }
+}</code></pre>
+
+      <p>
+        文件必须叫 <code>HelloWorld.java</code> —— <strong>文件名和 public 类名必须一致</strong>，
+        这是硬规定，不像别的语言随便起。
+      </p>
+
+      <h3>数据类型：基本类型 + 引用类型</h3>
+
+      <p>Java 有八种基本类型，和 C/C++ 基本一样：</p>
+
+      <p>
+        <code>byte</code>、<code>short</code>、<code>int</code>、<code>long</code>、
+        <code>float</code>、<code>double</code>、<code>char</code>、<code>boolean</code>
+      </p>
+
+      <p>
+        除此之外全是<strong>引用类型</strong>：类、接口、数组、枚举、注解。
+        这两者的区别，后面反序列化会反复用到：
+      </p>
+
+      <ul>
+        <li><strong>基本类型</strong>直接存值，放在栈上</li>
+        <li><strong>引用类型</strong>变量里存的是<em>对象的地址</em>，对象本身在堆上</li>
+      </ul>
+
+      <pre><code>int[] a = {1, 2, 3};</code></pre>
+
+      <p>
+        这一行创建了一个数组<strong>对象</strong>（在堆上），
+        <code>a</code> 这个变量在栈上，存的是这个对象的地址。
+        所以 Java 的数组本质也是对象，有 <code>length</code> 属性。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">两个常见的坑</span>
+        <ul>
+          <li>下标越界抛 <code>ArrayIndexOutOfBoundsException</code>，不像 C 那样静默越界</li>
+          <li>数组长度定死，不能动态扩容。要变长得用 <code>ArrayList</code></li>
+        </ul>
+      </div>
+
+      <h3>String 不能用 == 比</h3>
+
+      <pre><code>String name = "solowalker";
+if (name.equals("solo")) {
+    System.out.println("walker");
+}</code></pre>
+
+      <p>
+        <code>==</code> 在 Java 里比的是"两个引用是不是指向同一个对象"，
+        而 <code>equals()</code> 比的才是内容。<strong>字符串内容比较必须用 equals</strong>。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">这一点在安全里正好是漏洞</span>
+        <p>
+          有的业务代码用 <code>==</code> 比字符串（比如权限、口令），
+          在特定情况下会因为字符串池的复用而"碰巧相等"或"应该相等却不相等"，
+          导致校验被绕过。这类问题在代码审计里是实打实的点。
+        </p>
+      </div>
+
+      <h3>条件和循环</h3>
+
+      <pre><code>int score = 85;
+if (score &gt;= 90) {
+    System.out.println("优秀");
+} else if (score &gt;= 60) {
+    System.out.println("及格");
+} else {
+    System.out.println("不及格");
+}
+
+// switch 的箭头写法是 JDK 17 才有的，老版本和 C 一样
+int day = 3;
+switch (day) {
+    case 1, 2, 3, 4, 5 -&gt; System.out.println("工作日");
+    case 6, 7 -&gt; System.out.println("周末");
+    default -&gt; System.out.println("非法输入");
+}
+
+// 增强 for：遍历数组和集合，比下标舒服
+int[] arr = {1, 2, 3};
+for (int n : arr) {
+    System.out.println(n);
+}</code></pre>
+
+      <h3>方法：重载 vs 重写</h3>
+
+      <p>
+        这两个词长得像，含义完全不同，面试必问：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:6rem"></th><th>重载（Overload）</th><th>重写（Override）</th></tr></thead>
+        <tbody>
+          <tr><td>在哪</td><td>同一个类里</td><td>子类覆盖父类的方法</td></tr>
+          <tr><td>什么变</td><td>方法名相同，<strong>参数列表不同</strong></td><td>方法名、参数、返回值<strong>都相同</strong></td></tr>
+          <tr><td>何时决定</td><td><strong>编译期</strong>（静态绑定）</td><td><strong>运行期</strong>（动态绑定）</td></tr>
+        </tbody>
+      </table>
+
+      <pre><code>// 重载：同一个 add，三种参数
+public int add(int a, int b) { return a + b; }
+public int add(int a, int b, int c) { return a + b + c; }
+public double add(double a, double b) { return a + b; }
+
+// 重写：子类改写父类的方法
+class Animal {
+    public void speak() { System.out.println("动物叫声"); }
+}
+class Dog extends Animal {
+    @Override
+    public void speak() { System.out.println("汪汪"); }
+}</code></pre>
+
+      <p>
+        <strong>重写是后面反序列化链子的关键。</strong>
+        因为父类引用指向子类对象时，调用的到底是哪个 <code>speak()</code>，
+        是运行期才决定的 —— 攻击者可以伪造一个"看起来是父类、实际是子类"的对象，
+        让你的调用跑到他想跑的实现上去。
+      </p>
+
+      <h3>类和对象：OOP 的四个词</h3>
+
+      <p>
+        类是一个"抽象概念"，对象是它的"具体实例"。
+        拿苹果打比方：你嘴里说的"苹果"是个概念，手上拿着的那一个才是对象。
+      </p>
+
+      <p>为什么要这么组织代码？先看面向过程怎么写：</p>
+
+      <pre><code># 数据和函数是分开的
+student_name = "张三"
+student_age = 18
+
+def print_student(name, age):
+    print(f"{name}, {age}岁")</code></pre>
+
+      <p>
+        代码少的时候没问题。上千行以后，你根本记不住"哪个函数在动哪些数据"。
+        面向对象把<strong>数据和行为打包在一起</strong>：
+      </p>
+
+      <pre><code>class Student:
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+    def birthday(self):
+        self.age += 1
+
+    def introduce(self):
+        print(f"我是{self.name}，{self.age}岁")
+
+zhangsan = Student("张三", 18)
+zhangsan.birthday()
+zhangsan.introduce()</code></pre>
+
+      <p>四个核心概念，逐个说人话：</p>
+
+      <ol>
+        <li>
+          <strong>封装</strong> —— 把内部细节藏起来，只暴露必要的方法。
+          外面不知道对象里有什么，只知道能调什么。
+        </li>
+        <li>
+          <strong>继承</strong> —— 子类自动拥有父类的属性和方法。
+          苹果是一种水果，苹果类就可以继承水果类，水分、甜度这些属性不用重写。
+        </li>
+        <li>
+          <strong>多态</strong> —— 同一个调用，在���同对象上有不同表现。
+          行话叫"父类引用指向子类对象"。
+        </li>
+        <li>
+          <strong>抽象</strong> —— 只关心"做什么"，不关心"怎么做"。
+          接口里只声明方法，具体实现交给实现类。
+        </li>
+      </ol>
+
+      <div class="note secret">
+        <span class="note-tag">多说一句：注解为什么重要</span>
+        <p>
+          注解（<code>@Override</code>、<code>@RestController</code> 这些）本质是贴在代码上的标签，
+          自己不改变逻辑，但<strong>能在运行时被"反射"读出来，然后决定要做什么</strong>。
+        </p>
+        <p>
+          Spring 那一套全靠这个：看到一个 <code>@RequestMapping</code> 就知道这个方法对应哪个 URL。
+          而反射 + 注解 + 反序列化，正好是 Java 安全问题里最热闹的那一桌。
+        </p>
+      </div>
+
+      <h3>异常和注解，知道有这么回事就行</h3>
+
+      <pre><code>try {
+    int x = 10 / 0;
+} catch (ArithmeticException e) {
+    System.out.println("除数不能为 0：" + e.getMessage());
+} finally {
+    System.out.println("无论如何都会执行");
+}</code></pre>
+
+      <p>
+        <code>try-catch-finally</code> 用来兜住运行时错误，别让整个程序崩掉。
+        注解的写法长这样（自定义一个）：
+      </p>
+
+      <pre><code>@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)      ← 关键：运行时还能读得到
+@Documented
+public @interface Log {
+    String value() default "";
+    int level() default 1;
+}</code></pre>
+
+      <p>
+        注意 <code>@Retention(RUNTIME)</code> 那一行 —— 它决定了这个注解是"编译完就丢"，
+        还是"运行时还在，能被反射读出来"。后面那一类，才是攻击者关心的。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">Java 这块别指望看一遍就懂</span>
+        <p>
+          OOP 那四个概念，靠读是读不明白的。<strong>敲代码，自己写几个类继承一下、重写一下、
+          用接口实现一下</strong>，手感才会出来。
+        </p>
+        <p>
+          讲台上推荐的是 <a href="https://www.bilibili.com/video/BV12J41137hu/" target="_blank" rel="noopener">狂神说 Java</a>，
+          跟着敲一遍基础部分就够用了。
+        </p>
+      </div>
+
+
+      <h2 id="s-homework">作业</h2>
+
+      <p>勾上就会记在本机，下次打开还在。</p>
+
+      <ul class="checkable">
+        <li>
+          <input type="checkbox" id="hw1" data-k="php-lab">
+          <label for="hw1"><strong>打通 PHP 靶场四关。</strong>
+          <code>lab/php_lab/</code> 里四个文件，<code>php -S 127.0.0.1:8082</code> 起起来。
+          四关分别对应弱比较、0e、数组绕过、变量覆盖。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw2" data-k="py-lab">
+          <label for="hw2"><strong>用 Python 把第一讲的靶场打一遍。</strong>
+          就是上面那段 <code>try.py</code>，四段 flag 全拿到。
+          顺手把 Burp 挂上（加 <code>proxies</code>），看看脚本发的包和你手点的包一不一样。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw3" data-k="spider">
+          <label for="hw3"><strong>爬一下自己的周报。</strong>
+          用 <code>requests</code> 把某个页面的标题、或者某个列表抓下来打印出来。
+          抓不动就看看要不要加 headers（UA）。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw4" data-k="java">
+          <label for="hw4"><strong>看狂神的 Java 基础。</strong>
+          <a href="https://www.bilibili.com/video/BV12J41137hu/" target="_blank" rel="noopener">BV12J41137hu</a>，
+          至少看到"面向对象"那一块。不用全看完，能把类、对象、继承、重写说清楚就够。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw5" data-k="writeup">
+          <label for="hw5"><strong>（选做）写一段自己的笔记。</strong>
+          这一讲哪块最绕？用三五行话写清楚，挂在下面的茶寮里。
+          写给别人看的过程，就是你自己把它理顺的过程。</label>
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">下一讲会讲什么</span>
+        <p>
+          这一讲把三种语言的门推开了。下一讲大概率进<strong>PHP 反序列化</strong>或者
+          <strong>SQL 注入</strong> —— 前者要用到这一讲的"类与对象"，
+          后者要用到这一讲的"弱类型和字符串拼接"。
+        </p>
+        <p>所以别觉得"这几节没啥用"，它们是用得着的时候你才会想起的那种基础。</p>
+      </div>
+
+
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">卡住的地方、踩过的坑，留个话，别人也看得到</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本卷目录</h4>
+      <ul class="side-toc">
+        <li><a href="#s-intro">这一讲在讲什么</a></li>
+        <li><a href="#s-env">一 · 先把环境装上</a></li>
+        <li><a href="#s-python">二 · Python</a></li>
+        <li><a href="#s-php">三 · PHP</a></li>
+        <li><a href="#s-phpweak">四 · PHP 弱类型</a></li>
+        <li><a href="#s-phpfunc">五 · PHP 危险函数</a></li>
+        <li><a href="#s-java">六 · Java</a></li>
+        <li><a href="#s-homework">七 · 作业</a></li>
+      </ul>
+    </div>
+
+    <div class="side-block">
+      <h4>读了几成</h4>
+      <div class="progress-ring" data-progress-ring>
+        <svg width="42" height="42" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"></circle>
+          <circle class="ring-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"
+                  stroke-linecap="round" transform="rotate(-90 18 18)"
+                  style="stroke-dasharray:97.39;stroke-dashoffset:97.39"></circle>
+        </svg>
+        <span class="num"><b data-progress-num>0/0</b>作业打了勾</span>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 其二 &middot; PHP、Python 与 Java</p>
+  <p class="colophon">所有实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="../assets/js/site-config.js"></script>
+<script src="../assets/js/comments.js"></script>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>
