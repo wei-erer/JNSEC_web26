@@ -15,6 +15,7 @@ desktop.ini
 
 # 靶场跑起来时生成的东西
 lab/flag.txt
+lab/sql_lab/data.sqlite
 lab/public/
 __pycache__/
 *.pyc

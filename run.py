@@ -26,10 +26,12 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 LAB_DIR = os.path.join(ROOT, "lab")
 LAB_FILE = os.path.join(LAB_DIR, "zhulin_lab.py")
 PHP_DIR = os.path.join(LAB_DIR, "php_lab")
+SQL_DIR = os.path.join(LAB_DIR, "sql_lab")
 
 WEB_PORT = 8000
 LAB_PORT = 8081
 PHP_PORT = 8082
+SQL_PORT = 8083
 
 
 def find_php():
@@ -125,21 +127,38 @@ def main():
         print("  [PHP ]  正在启动 ...")
         procs.append(start([php, "-S", "127.0.0.1:%d" % PHP_PORT, "router.php"], PHP_DIR))
 
+    # SQL 靶场（第三讲配套，同样靠 PHP 跑）
+    sql_note = ""
+    if php is None:
+        sql_note = "没找到 PHP，跳过"
+    elif port_open(SQL_PORT):
+        print("  [SQL ]  8083 已经有服务在跑，跳过")
+    else:
+        print("  [SQL ]  正在启动 ...")
+        procs.append(start([php, "-S", "127.0.0.1:%d" % SQL_PORT, "router.php"], SQL_DIR))
+
     time.sleep(1.6)
 
     ok_web = port_open(WEB_PORT)
     ok_lab = port_open(LAB_PORT)
     ok_php = port_open(PHP_PORT)
+    ok_sql = port_open(SQL_PORT)
 
     print("  " + "-" * 34)
     print("  网站   http://127.0.0.1:%d   %s" % (WEB_PORT, "OK" if ok_web else "启动失败"))
     print("  靶场   http://127.0.0.1:%d   %s" % (LAB_PORT, "OK" if ok_lab else "启动失败"))
     if ok_php:
-        print("  PHP    http://127.0.0.1:%d   OK" % PHP_PORT)
+        print("  PHP    http://127.0.0.1:%d   OK  （第二讲 · 弱类型四关）" % PHP_PORT)
     elif php_note:
         print("  PHP    ———                  %s" % php_note)
     else:
         print("  PHP    http://127.0.0.1:%d   启动失败" % PHP_PORT)
+    if ok_sql:
+        print("  SQL    http://127.0.0.1:%d   OK  （第三讲 · 注入三关）" % SQL_PORT)
+    elif sql_note:
+        print("  SQL    ———                  %s" % sql_note)
+    else:
+        print("  SQL    http://127.0.0.1:%d   启动失败" % SQL_PORT)
     print()
     print("  浏览器会自动打开。要停的时候按 Ctrl+C，")
     print("  或者直接把这个窗口关掉。")
