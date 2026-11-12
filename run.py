@@ -27,11 +27,13 @@ LAB_DIR = os.path.join(ROOT, "lab")
 LAB_FILE = os.path.join(LAB_DIR, "zhulin_lab.py")
 PHP_DIR = os.path.join(LAB_DIR, "php_lab")
 SQL_DIR = os.path.join(LAB_DIR, "sql_lab")
+FILE_DIR = os.path.join(LAB_DIR, "file_lab")
 
 WEB_PORT = 8000
 LAB_PORT = 8081
 PHP_PORT = 8082
 SQL_PORT = 8083
+FILE_PORT = 8084
 
 
 def find_php():
@@ -137,12 +139,23 @@ def main():
         print("  [SQL ]  正在启动 ...")
         procs.append(start([php, "-S", "127.0.0.1:%d" % SQL_PORT, "router.php"], SQL_DIR))
 
+    # 文件靶场（第四讲配套）
+    file_note = ""
+    if php is None:
+        file_note = "没找到 PHP，跳过"
+    elif port_open(FILE_PORT):
+        print("  [FILE]  8084 已经有服务在跑，跳过")
+    else:
+        print("  [FILE]  正在启动 ...")
+        procs.append(start([php, "-S", "127.0.0.1:%d" % FILE_PORT, "router.php"], FILE_DIR))
+
     time.sleep(1.6)
 
     ok_web = port_open(WEB_PORT)
     ok_lab = port_open(LAB_PORT)
     ok_php = port_open(PHP_PORT)
     ok_sql = port_open(SQL_PORT)
+    ok_file = port_open(FILE_PORT)
 
     print("  " + "-" * 34)
     print("  网站   http://127.0.0.1:%d   %s" % (WEB_PORT, "OK" if ok_web else "启动失败"))
@@ -159,6 +172,12 @@ def main():
         print("  SQL    ———                  %s" % sql_note)
     else:
         print("  SQL    http://127.0.0.1:%d   启动失败" % SQL_PORT)
+    if ok_file:
+        print("  FILE   http://127.0.0.1:%d   OK  （第四讲 · 包含与上传四关）" % FILE_PORT)
+    elif file_note:
+        print("  FILE   ———                  %s" % file_note)
+    else:
+        print("  FILE   http://127.0.0.1:%d   启动失败" % FILE_PORT)
     print()
     print("  浏览器会自动打开。要停的时候按 Ctrl+C，")
     print("  或者直接把这个窗口关掉。")

