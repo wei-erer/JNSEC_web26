@@ -28,12 +28,14 @@ LAB_FILE = os.path.join(LAB_DIR, "zhulin_lab.py")
 PHP_DIR = os.path.join(LAB_DIR, "php_lab")
 SQL_DIR = os.path.join(LAB_DIR, "sql_lab")
 FILE_DIR = os.path.join(LAB_DIR, "file_lab")
+DESER_DIR = os.path.join(LAB_DIR, "deser_lab")
 
 WEB_PORT = 8000
 LAB_PORT = 8081
 PHP_PORT = 8082
 SQL_PORT = 8083
 FILE_PORT = 8084
+DESER_PORT = 8085
 
 
 def find_php():
@@ -149,6 +151,16 @@ def main():
         print("  [FILE]  正在启动 ...")
         procs.append(start([php, "-S", "127.0.0.1:%d" % FILE_PORT, "router.php"], FILE_DIR))
 
+    # 反序列化靶场（第五讲配套）
+    deser_note = ""
+    if php is None:
+        deser_note = "没找到 PHP，跳过"
+    elif port_open(DESER_PORT):
+        print("  [DESER] 8085 已经有服务在跑，跳过")
+    else:
+        print("  [DESER] 正在启动 ...")
+        procs.append(start([php, "-S", "127.0.0.1:%d" % DESER_PORT, "router.php"], DESER_DIR))
+
     time.sleep(1.6)
 
     ok_web = port_open(WEB_PORT)
@@ -156,6 +168,7 @@ def main():
     ok_php = port_open(PHP_PORT)
     ok_sql = port_open(SQL_PORT)
     ok_file = port_open(FILE_PORT)
+    ok_deser = port_open(DESER_PORT)
 
     print("  " + "-" * 34)
     print("  网站   http://127.0.0.1:%d   %s" % (WEB_PORT, "OK" if ok_web else "启动失败"))
@@ -178,6 +191,12 @@ def main():
         print("  FILE   ———                  %s" % file_note)
     else:
         print("  FILE   http://127.0.0.1:%d   启动失败" % FILE_PORT)
+    if ok_deser:
+        print("  DESER  http://127.0.0.1:%d   OK  （第五讲 · 反序列化三关）" % DESER_PORT)
+    elif deser_note:
+        print("  DESER  ———                  %s" % deser_note)
+    else:
+        print("  DESER  http://127.0.0.1:%d   启动失败" % DESER_PORT)
     print()
     print("  浏览器会自动打开。要停的时候按 Ctrl+C，")
     print("  或者直接把这个窗口关掉。")
